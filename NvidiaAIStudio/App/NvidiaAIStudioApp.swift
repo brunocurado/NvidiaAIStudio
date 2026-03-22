@@ -6,17 +6,13 @@ import UserNotifications
 struct NvidiaAIStudioApp: App {
     @State private var appState = AppState()
     @State private var showSplash = true
-    @AppStorage("theme") private var theme = "dark"
-    
-    // App delegate to handle activation
+    @State private var showOnboarding = false
+    @AppStorage("appThemeID") private var appThemeID: String = "dark"
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
     private var colorScheme: ColorScheme? {
-        switch theme {
-        case "dark": return .dark
-        case "light": return .light
-        default: return nil  // system
-        }
+        AppTheme.find(id: appThemeID).colorScheme
     }
     
     var body: some Scene {
@@ -29,12 +25,25 @@ struct NvidiaAIStudioApp: App {
                 if showSplash {
                     SplashScreenView(isFinished: $showSplash)
                 }
+                if showOnboarding {
+                    OnboardingView(isPresented: $showOnboarding)
+                        .environment(appState)
+                        .transition(.opacity)
+                        .onChange(of: showOnboarding) { _, val in
+                            if !val { hasCompletedOnboarding = true }
+                        }
+                }
             }
             .frame(minWidth: 900, minHeight: 600)
             .preferredColorScheme(colorScheme)
             .onAppear {
                 appState.bootstrap()
-                
+                // Show onboarding on first launch or if no keys configured
+                if !hasCompletedOnboarding || appState.apiKeys.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        showOnboarding = true
+                    }
+                }
                 NSApp.activate(ignoringOtherApps: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     if let window = NSApp.windows.first {

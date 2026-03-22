@@ -225,26 +225,27 @@ struct ModelsSettingsView: View {
 // MARK: - General Tab
 
 struct GeneralSettingsView: View {
-    @AppStorage("theme") private var theme = "dark"
+    @AppStorage("appThemeID") private var appThemeID: String = "dark"
     @AppStorage("glassOpacity") private var glassOpacity: Double = 0.25
     @AppStorage("glassBlur") private var glassBlur: Double = 20.0
     @AppStorage("visionDelegateModelID") private var visionDelegateModelID = "nvidia/nemotron-nano-12b-v2-vl"
     @Environment(AppState.self) private var appState
-    
+
+    private let columns = [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 8)]
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 // Theme
                 Text("Appearance")
                     .font(.headline)
-                
-                Picker("Theme", selection: $theme) {
-                    Text("Dark").tag("dark")
-                    Text("Light").tag("light")
-                    Text("System").tag("system")
+
+                LazyVGrid(columns: columns, spacing: 8) {
+                    ForEach(AppTheme.all) { t in
+                        ThemeCard(theme: t, isSelected: appThemeID == t.id)
+                            .onTapGesture { appThemeID = t.id }
+                    }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 250)
                 
                 // Glassmorphism sliders
                 Divider()
@@ -432,6 +433,56 @@ struct GitHubSettingsView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Theme Card
+
+struct ThemeCard: View {
+    let theme: AppTheme
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(spacing: 6) {
+            // Mini preview
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.backgroundTint)
+                .frame(height: 44)
+                .overlay(
+                    HStack(spacing: 4) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(theme.sidebarTint)
+                            .frame(width: 18)
+                        VStack(spacing: 3) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(theme.accentColor.opacity(0.7))
+                                .frame(height: 5)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white.opacity(0.3))
+                                .frame(height: 5)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.white.opacity(0.2))
+                                .frame(height: 5)
+                        }
+                        .padding(.trailing, 4)
+                    }
+                    .padding(5)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(isSelected ? theme.accentColor : Color.white.opacity(0.1), lineWidth: isSelected ? 2 : 1)
+                )
+
+            HStack(spacing: 4) {
+                Image(systemName: theme.icon)
+                    .font(.system(size: 9))
+                    .foregroundStyle(isSelected ? theme.accentColor : .secondary)
+                Text(theme.name)
+                    .font(.system(size: 10))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+        }
+        .contentShape(Rectangle())
     }
 }
 

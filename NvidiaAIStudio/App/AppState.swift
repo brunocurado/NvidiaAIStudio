@@ -70,8 +70,46 @@ final class AppState {
         }
     }
     
-    // MARK: - Workspace
+    // MARK: - Workspaces
     var activeWorkspacePath: String = FileManager.default.currentDirectoryPath
+
+    /// Saved workspace paths the user has opened before.
+    var savedWorkspaces: [SavedWorkspace] = {
+        guard let data = UserDefaults.standard.data(forKey: "savedWorkspaces"),
+              let decoded = try? JSONDecoder().decode([SavedWorkspace].self, from: data)
+        else { return [] }
+        return decoded
+    }()
+
+    func addWorkspace(path: String) {
+        let ws = SavedWorkspace(path: path)
+        if !savedWorkspaces.contains(where: { $0.path == path }) {
+            savedWorkspaces.insert(ws, at: 0)
+            persistWorkspaces()
+        }
+        switchWorkspace(path: path)
+    }
+
+    func removeWorkspace(_ ws: SavedWorkspace) {
+        savedWorkspaces.removeAll { $0.id == ws.id }
+        persistWorkspaces()
+    }
+
+    func switchWorkspace(path: String) {
+        activeWorkspacePath = path
+        // Update last used date
+        if let idx = savedWorkspaces.firstIndex(where: { $0.path == path }) {
+            savedWorkspaces[idx].lastUsed = Date()
+            persistWorkspaces()
+        }
+        refreshGitBranch()
+    }
+
+    private func persistWorkspaces() {
+        if let data = try? JSONEncoder().encode(savedWorkspaces) {
+            UserDefaults.standard.set(data, forKey: "savedWorkspaces")
+        }
+    }
     
     // MARK: - GitHub
     var gitHubUsername: String? = nil
@@ -300,6 +338,25 @@ enum FileAccessLevel: String, CaseIterable {
         case .fullAccess: return "lock.open.fill"
         case .sandboxed: return "lock.fill"
         }
+    }
+}
+
+// MARK: - Saved Workspace
+
+struct SavedWorkspace: Identifiable, Codable, Equatable {
+    let id: UUID
+    let path: String
+    var lastUsed: Date
+
+    init(id: UUID = UUID(), path: String, lastUsed: Date = Date()) {
+        self.id = id
+        self.path = path
+        self.lastUsed = lastUsed
+    }
+
+    var name: String { URL(fileURLWithPath: path).lastPathComponent }
+    var displayPath: String {
+        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
 }
 

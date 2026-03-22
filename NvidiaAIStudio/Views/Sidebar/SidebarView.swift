@@ -48,9 +48,8 @@ struct SidebarView: View {
                 SidebarActionButton(icon: "plus.message.fill", label: "New thread", accentColor: .green) {
                     let _ = appState.createSession()
                 }
-                SidebarActionButton(icon: "folder.badge.plus", label: "Open Workspace", accentColor: .orange) {
-                    openWorkspacePicker()
-                }
+                // Workspace button with recent workspaces submenu
+                WorkspaceSidebarButton(onOpenPicker: openWorkspacePicker)
                 SidebarActionButton(icon: "sparkles", label: "Skills", accentColor: .purple) {
                     showSkillsPanel = true
                 }
@@ -186,12 +185,11 @@ struct SidebarView: View {
         panel.message = "Choose a project folder to open as workspace"
         
         if panel.runModal() == .OK, let url = panel.url {
-            appState.activeWorkspacePath = url.path
+            appState.addWorkspace(path: url.path)
             var session = appState.createSession(title: "New Thread")
             session.projectPath = url.path
             appState.activeSession = session
             appState.showToast("Workspace: \(url.lastPathComponent)", level: .success)
-            appState.refreshGitBranch()
         }
     }
 }
@@ -325,6 +323,75 @@ struct SidebarActionButton: View {
             .background(isHovered ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Workspace Button with recent workspaces
+
+struct WorkspaceSidebarButton: View {
+    @Environment(AppState.self) private var appState
+    let onOpenPicker: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Menu {
+            Button {
+                onOpenPicker()
+            } label: {
+                Label("Browse\u{2026}", systemImage: "folder.badge.plus")
+            }
+
+            if !appState.savedWorkspaces.isEmpty {
+                Divider()
+                Text("Recent Workspaces")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                ForEach(appState.savedWorkspaces.prefix(8)) { ws in
+                    Button {
+                        appState.switchWorkspace(path: ws.path)
+                        appState.showToast("Workspace: \(ws.name)", level: .success)
+                    } label: {
+                        HStack {
+                            Label(ws.name, systemImage: ws.path == appState.activeWorkspacePath ? "folder.fill" : "folder")
+                            Spacer()
+                            if ws.path == appState.activeWorkspacePath {
+                                Image(systemName: "checkmark")
+                                    .font(.caption2)
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+                Button(role: .destructive) {
+                    appState.savedWorkspaces.removeAll()
+                    UserDefaults.standard.removeObject(forKey: "savedWorkspaces")
+                } label: {
+                    Label("Clear Recent", systemImage: "trash")
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.badge.plus")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+                    .frame(width: 16)
+                Text("Open Workspace")
+                    .font(.caption)
+                Spacer()
+                if !appState.savedWorkspaces.isEmpty {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(isHovered ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .menuStyle(.borderlessButton)
         .onHover { isHovered = $0 }
     }
 }

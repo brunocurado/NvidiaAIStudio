@@ -29,23 +29,19 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("glassOpacity") private var glassOpacity: Double = 0.25
     @AppStorage("glassBlur") private var glassBlur: Double = 20.0
+    @AppStorage("appThemeID") private var appThemeID: String = "dark"
     @State private var showGitPanel = false
     @State private var showCloneSheet = false
 
+    private var theme: AppTheme { AppTheme.find(id: appThemeID) }
+
     var body: some View {
         ZStack {
-            // Glassmorphism background via native NSVisualEffectView.
-            // glassOpacity slider (0–1) maps directly to the view's alphaValue:
-            //   1.0 = fully opaque frosted material
-            //   0.0 = completely transparent (no material at all)
-            // This gives a perfectly smooth, linear fade with no cliff edges.
             VisualEffectBackground(alphaValue: CGFloat(glassOpacity))
                 .ignoresSafeArea()
-            // Dark tint layer — scales with opacity so it also fades out cleanly
-            Color(red: 0.06, green: 0.06, blue: 0.16)
+            theme.backgroundTint
                 .opacity(glassOpacity * 0.6)
                 .ignoresSafeArea()
-            // Frosted overlay
             if glassBlur > 0 {
                 Color.white
                     .opacity(glassBlur / 50.0 * 0.35)
