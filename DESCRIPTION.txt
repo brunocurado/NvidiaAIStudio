@@ -1,0 +1,1 @@
+Native macOS AI coding assistant powered by NVIDIA NIM. Agentic file access, GitHub integration, 16+ frontier models (DeepSeek, Kimi, Qwen, Llama), and a glassmorphism SwiftUI interface. Free to use with a NVIDIA NIM API key.

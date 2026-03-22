@@ -1,0 +1,20 @@
+# Swift build artifacts
+.build/
+*.o
+*.d
+
+# App bundle output
+NvidiaAIStudio/build/
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Environment / secrets — never commit your API key
+.env
+
+# Python leftovers
+__pycache__/
+*.pyc
+.venv/
+venv/
