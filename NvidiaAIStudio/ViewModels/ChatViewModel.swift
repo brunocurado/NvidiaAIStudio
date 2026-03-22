@@ -40,11 +40,17 @@ final class ChatViewModel {
         }
         
         isStreaming = true
-        
-        let service = NVIDIAAPIService(apiKey: apiKey)
+
+        // Use the factory to get the correct service for the active provider
+        let service = ProviderServiceFactory.make(
+            provider: appState.activeProvider,
+            apiKey: apiKey,
+            customBaseURL: appState.apiKeys
+                .first { $0.provider == appState.activeProvider && $0.isActive }?
+                .customBaseURL
+        )
         let tools = skillRegistry.toolDefinitions
-        
-        // Agent loop: keep running until the model stops asking for tools
+
         streamTask = Task { [weak self] in
             guard let self else { return }
             await self.agentLoop(
@@ -70,7 +76,7 @@ final class ChatViewModel {
     /// Agentic loop: stream → if tool_calls → execute tools → feed results → stream again.
     /// Max 10 iterations to prevent infinite loops.
     private func agentLoop(
-        service: NVIDIAAPIService,
+        service: any AIProvider,
         model: AIModel,
         tools: [[String: Any]],
         appState: AppState,
@@ -352,7 +358,10 @@ final class ChatViewModel {
         
         streamingStatus = "Compressing context\u{2026}"
         
-        let service = NVIDIAAPIService(apiKey: apiKey)
+        let service = ProviderServiceFactory.make(
+            provider: appState.activeProvider,
+            apiKey: apiKey
+        )
         var summary = ""
         
         do {

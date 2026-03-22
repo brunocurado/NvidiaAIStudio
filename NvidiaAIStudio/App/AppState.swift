@@ -38,6 +38,37 @@ final class AppState {
     var activeAPIKey: String? {
         apiKeys.first { $0.provider == activeProvider && $0.isActive }?.key
     }
+
+    /// Models for the currently active provider.
+    var modelsForActiveProvider: [AIModel] {
+        switch activeProvider {
+        case .nvidia:    return availableModels.filter { $0.provider == .nvidia }
+        case .anthropic: return AIModel.anthropicModels
+        case .openai:    return AIModel.openAIModels
+        case .custom:    return availableModels.filter { $0.provider == .custom }
+        }
+    }
+
+    /// Switch provider and auto-select a sensible default model.
+    func switchProvider(_ newProvider: Provider) {
+        activeProvider = newProvider
+        // Pick first enabled model of that provider
+        if let first = modelsForActiveProvider.first {
+            selectedModelID = first.id
+        }
+        // Merge provider-specific models into availableModels if not already present
+        let toMerge: [AIModel]
+        switch newProvider {
+        case .anthropic: toMerge = AIModel.anthropicModels
+        case .openai:    toMerge = AIModel.openAIModels
+        default:         toMerge = []
+        }
+        for model in toMerge {
+            if !availableModels.contains(where: { $0.id == model.id }) {
+                availableModels.append(model)
+            }
+        }
+    }
     
     // MARK: - Workspace
     var activeWorkspacePath: String = FileManager.default.currentDirectoryPath

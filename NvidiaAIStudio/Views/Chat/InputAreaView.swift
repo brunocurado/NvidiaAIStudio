@@ -89,9 +89,36 @@ struct InputAreaView: View {
             
             // Bottom toolbar: Model, Reasoning, Access, Branch, Context
             HStack(spacing: 12) {
-                // Model picker
+                // Provider picker
                 Menu {
-                    ForEach(appState.availableModels.filter(\.isEnabled)) { model in
+                    ForEach(Provider.allCases) { p in
+                        Button {
+                            appState.switchProvider(p)
+                        } label: {
+                            HStack {
+                                Image(systemName: p.icon)
+                                Text(p.rawValue)
+                                if p == appState.activeProvider {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: appState.activeProvider.icon)
+                            .font(.caption2)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                // Model picker — filtered to active provider
+                Menu {
+                    ForEach(appState.modelsForActiveProvider.filter(\.isEnabled)) { model in
                         Button {
                             appState.selectedModelID = model.id
                         } label: {

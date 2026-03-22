@@ -28,6 +28,25 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
         self.isEnabled = isEnabled
     }
     
+    /// Curated models for Anthropic.
+    static let anthropicModels: [AIModel] = [
+        AIModel(id: "claude-opus-4-5",           name: "🟠 Claude Opus 4 — Most capable",       provider: .anthropic, contextWindow: 200_000, supportsThinking: true,  supportsVision: true),
+        AIModel(id: "claude-sonnet-4-5",          name: "🟠 Claude Sonnet 4 — Fast & smart",    provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsVision: true),
+        AIModel(id: "claude-haiku-4-5",           name: "🟠 Claude Haiku 4 — Fastest",          provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsVision: true),
+        AIModel(id: "claude-3-7-sonnet-20250219", name: "🟠 Claude 3.7 Sonnet — Extended think",provider: .anthropic, contextWindow: 200_000, supportsThinking: true,  supportsVision: true),
+        AIModel(id: "claude-3-5-haiku-20241022",  name: "🟠 Claude 3.5 Haiku — Ultra fast",     provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsVision: true),
+    ]
+
+    /// Curated models for OpenAI.
+    static let openAIModels: [AIModel] = [
+        AIModel(id: "gpt-4o",          name: "🟢 GPT-4o — Flagship multimodal",    provider: .openai, contextWindow: 128_000, supportsThinking: false, supportsVision: true),
+        AIModel(id: "gpt-4o-mini",     name: "🟢 GPT-4o Mini — Fast & cheap",      provider: .openai, contextWindow: 128_000, supportsThinking: false, supportsVision: true),
+        AIModel(id: "o3",              name: "🟢 o3 — Best reasoning",              provider: .openai, contextWindow: 200_000, supportsThinking: true,  supportsVision: true),
+        AIModel(id: "o4-mini",         name: "🟢 o4-mini — Fast reasoning",         provider: .openai, contextWindow: 200_000, supportsThinking: true,  supportsVision: true),
+        AIModel(id: "gpt-4.1",         name: "🟢 GPT-4.1 — Latest flagship",        provider: .openai, contextWindow: 1_000_000, supportsThinking: false, supportsVision: true),
+        AIModel(id: "gpt-4.1-mini",    name: "🟢 GPT-4.1 Mini — Efficient",        provider: .openai, contextWindow: 1_000_000, supportsThinking: false, supportsVision: true),
+    ]
+
     /// Curated default models matching the Python `models.py` list.
     static let defaultModels: [AIModel] = [
         // ── Flagship / Daily Drivers ──
