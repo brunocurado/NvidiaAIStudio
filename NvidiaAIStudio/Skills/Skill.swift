@@ -66,6 +66,12 @@ final class SkillRegistry {
     func register(_ skill: any Skill) {
         skills[skill.name] = skill
     }
+
+    /// Unregister a skill by name.
+    func unregister(_ name: String) {
+        skills.removeValue(forKey: name)
+        disabledSkills.remove(name)
+    }
     
     /// Disable a skill (won't appear in tool definitions).
     func disable(_ name: String) {

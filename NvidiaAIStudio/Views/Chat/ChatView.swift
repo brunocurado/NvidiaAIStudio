@@ -5,6 +5,7 @@ struct ChatView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = ChatViewModel()
     @State private var showExportPanel = false
+    @State private var showNewAgentSheet = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -88,6 +89,14 @@ struct ChatView: View {
             if appState.activeSession != nil {
                 ToolbarItem(placement: .automatic) {
                     Button {
+                        showNewAgentSheet = true
+                    } label: {
+                        Image(systemName: "person.fill.badge.plus")
+                    }
+                    .help("New Background Agent (⌘⇧A)")
+                    .keyboardShortcut("a", modifiers: [.command, .shift])
+
+                    Button {
                         showExportPanel = true
                     } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -103,6 +112,10 @@ struct ChatView: View {
             contentType: .plainText,
             defaultFilename: appState.activeSession?.title ?? "conversation"
         ) { _ in }
+        .sheet(isPresented: $showNewAgentSheet) {
+            NewAgentSheet()
+                .environment(appState)
+        }
     }
 }
 
@@ -146,6 +159,8 @@ struct ConversationDocument: FileDocument {
 struct BackgroundAgentsPanelView: View {
     let agents: [BackgroundAgent]
     @State private var isExpanded = true
+    @State private var selectedAgentID: UUID? = nil
+    @State private var showAgentDetail = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -199,7 +214,8 @@ struct BackgroundAgentsPanelView: View {
                             Spacer()
                             
                             Button("Open") {
-                                // TODO: Open agent detail
+                                selectedAgentID = agent.id
+                                showAgentDetail = true
                             }
                             .font(.caption)
                             .fontWeight(.medium)
@@ -215,8 +231,13 @@ struct BackgroundAgentsPanelView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(.white.opacity(0.1), lineWidth: 1)
         )
+        .sheet(isPresented: $showAgentDetail) {
+            if let id = selectedAgentID {
+                AgentDetailView(agentID: id)
+            }
+        }
     }
-    
+
     private func agentColor(_ status: BackgroundAgent.AgentStatus) -> Color {
         switch status {
         case .thinking: return .orange

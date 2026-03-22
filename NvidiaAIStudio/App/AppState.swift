@@ -262,7 +262,8 @@ final class AppState {
         loadSessions()
         loadGitHubCredentials()
         AppNotifications.requestPermission()
-        
+        MCPManager.shared.connectAll()
+
         // Auto-load API key from .env if no keys configured
         if apiKeys.isEmpty, let envKey = EnvParser.loadNVIDIAKey() {
             let key = APIKey(provider: .nvidia, name: "NVIDIA (from .env)", key: envKey)

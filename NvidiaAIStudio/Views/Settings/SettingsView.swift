@@ -26,12 +26,17 @@ struct SettingsView: View {
                     Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
                 }
             
+            MCPSettingsView()
+                .tabItem {
+                    Label("MCP", systemImage: "puzzlepiece.extension.fill")
+                }
+
             SSHSettingsView()
                 .tabItem {
                     Label("SSH", systemImage: "terminal.fill")
                 }
         }
-        .frame(width: 580, height: 540)
+        .frame(width: 620, height: 560)
     }
 }
 
@@ -433,6 +438,232 @@ struct GitHubSettingsView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - MCP Settings Tab
+
+struct MCPSettingsView: View {
+    @State private var manager = MCPManager.shared
+    @State private var showAddSheet = false
+    @State private var newName = ""
+    @State private var newCommand = "npx"
+    @State private var newArgs = "-y @modelcontextprotocol/server-filesystem ~/projects"
+    @State private var transportType = 0 // 0=stdio, 1=sse
+    @State private var newSSEURL = "http://localhost:3000/sse"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("MCP Servers")
+                        .font(.headline)
+                    Text("Connect external tools via Model Context Protocol.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button { showAddSheet = true } label: {
+                    Label("Add Server", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+
+            if manager.serverConfigs.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "puzzlepiece.extension")
+                        .font(.largeTitle).foregroundStyle(.tertiary)
+                    Text("No MCP servers configured")
+                        .foregroundStyle(.secondary)
+                    Text("Add a server to give the AI access to databases, calendars, APIs, and more.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(manager.serverConfigs) { config in
+                            MCPServerRow(config: config)
+                        }
+                    }
+                }
+            }
+
+            if manager.totalToolCount > 0 {
+                HStack {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text("\(manager.totalToolCount) tools available to the AI")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
+        .sheet(isPresented: $showAddSheet) {
+            AddMCPServerSheet(isPresented: $showAddSheet)
+        }
+    }
+}
+
+struct MCPServerRow: View {
+    let config: MCPServerConfig
+    @State private var manager = MCPManager.shared
+
+    private var connection: MCPConnection? {
+        manager.connections.first { $0.id == config.id }
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            // Status dot
+            Circle()
+                .fill(statusColor)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(config.name).font(.body).fontWeight(.medium)
+                Text(config.summary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let conn = connection, !conn.discoveredTools.isEmpty {
+                    Text("\(conn.discoveredTools.count) tools")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Toggle("", isOn: Binding(
+                get: { config.isEnabled },
+                set: { manager.toggleServer(id: config.id, enabled: $0) }
+            )).labelsHidden()
+
+            Button(role: .destructive) {
+                manager.removeServer(id: config.id)
+            } label: {
+                Image(systemName: "trash").font(.caption)
+            }.buttonStyle(.borderless)
+        }
+        .padding(10)
+        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var statusColor: Color {
+        switch connection?.status {
+        case .connected:  return .green
+        case .connecting: return .orange
+        case .failed:     return .red
+        default:          return config.isEnabled ? .orange : .gray
+        }
+    }
+}
+
+struct AddMCPServerSheet: View {
+    @Binding var isPresented: Bool
+    @State private var manager = MCPManager.shared
+    @State private var name = ""
+    @State private var transportType = 0
+    @State private var command = "npx"
+    @State private var args = "-y @modelcontextprotocol/server-filesystem ~/projects"
+    @State private var sseURL = "http://localhost:3000/sse"
+
+    private let presets: [(name: String, command: String, args: String)] = [
+        ("Filesystem",   "npx", "-y @modelcontextprotocol/server-filesystem ~/projects"),
+        ("Git",          "npx", "-y @modelcontextprotocol/server-git"),
+        ("GitHub",       "npx", "-y @modelcontextprotocol/server-github"),
+        ("Postgres",     "npx", "-y @modelcontextprotocol/server-postgres postgresql://localhost/mydb"),
+        ("Brave Search", "npx", "-y @modelcontextprotocol/server-brave-search"),
+        ("Memory",       "npx", "-y @modelcontextprotocol/server-memory"),
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Add MCP Server").font(.headline)
+                Spacer()
+                Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
+            }.padding()
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // Presets
+                    Text("Quick Add").font(.subheadline).fontWeight(.semibold)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 6) {
+                        ForEach(presets, id: \.name) { preset in
+                            Button {
+                                name = preset.name
+                                command = preset.command
+                                args = preset.args
+                                transportType = 0
+                            } label: {
+                                Text(preset.name).font(.caption).frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    Divider()
+
+                    TextField("Server name", text: $name)
+                        .textFieldStyle(.roundedBorder)
+
+                    Picker("Transport", selection: $transportType) {
+                        Text("stdio (local process)").tag(0)
+                        Text("SSE (remote URL)").tag(1)
+                    }.pickerStyle(.segmented)
+
+                    if transportType == 0 {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Command").font(.caption).foregroundStyle(.secondary)
+                            TextField("npx / node / python", text: $command)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                            Text("Arguments").font(.caption).foregroundStyle(.secondary)
+                            TextField("-y @modelcontextprotocol/server-filesystem ~/projects", text: $args)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("SSE URL").font(.caption).foregroundStyle(.secondary)
+                            TextField("http://localhost:3000/sse", text: $sseURL)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Add & Connect") { addServer() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(name.isEmpty)
+                            .keyboardShortcut(.defaultAction)
+                    }
+                }
+                .padding()
+            }
+        }
+        .frame(width: 480, height: 480)
+    }
+
+    private func addServer() {
+        let transport: MCPServerConfig.Transport
+        if transportType == 0 {
+            let argList = args.split(separator: " ").map(String.init)
+            transport = .stdio(command: command, args: argList, env: [:])
+        } else {
+            transport = .sse(url: sseURL, headers: [:])
+        }
+        let config = MCPServerConfig(name: name, transport: transport)
+        manager.addServer(config)
+        isPresented = false
     }
 }
 
