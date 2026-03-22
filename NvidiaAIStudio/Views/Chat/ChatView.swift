@@ -4,6 +4,7 @@ import SwiftUI
 struct ChatView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = ChatViewModel()
+    @State private var showExportPanel = false
     
     var body: some View {
         VStack(spacing: 0) {
@@ -83,6 +84,61 @@ struct ChatView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
         }
+        .toolbar {
+            if appState.activeSession != nil {
+                ToolbarItem(placement: .automatic) {
+                    Button {
+                        showExportPanel = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .help("Export conversation")
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                }
+            }
+        }
+        .fileExporter(
+            isPresented: $showExportPanel,
+            document: ConversationDocument(session: appState.activeSession),
+            contentType: .plainText,
+            defaultFilename: appState.activeSession?.title ?? "conversation"
+        ) { _ in }
+    }
+}
+
+// MARK: - Export Document
+
+import UniformTypeIdentifiers
+
+struct ConversationDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    let text: String
+
+    init(session: Session?) {
+        guard let session else { self.text = ""; return }
+        var lines: [String] = []
+        lines.append("# \(session.title)")
+        lines.append("Exported: \(Date().formatted(date: .long, time: .shortened))")
+        lines.append("")
+        for msg in session.messages where msg.role != .system {
+            switch msg.role {
+            case .user:      lines.append("## You")
+            case .assistant: lines.append("## Assistant")
+            case .tool:      lines.append("## Tool Result")
+            default: continue
+            }
+            lines.append(msg.content)
+            lines.append("")
+        }
+        self.text = lines.joined(separator: "\n")
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        text = String(data: configuration.file.regularFileContents ?? Data(), encoding: .utf8) ?? ""
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: text.data(using: .utf8)!)
     }
 }
 

@@ -192,6 +192,7 @@ final class AppState {
     func bootstrap() {
         loadSessions()
         loadGitHubCredentials()
+        AppNotifications.requestPermission()
         
         // Auto-load API key from .env if no keys configured
         if apiKeys.isEmpty, let envKey = EnvParser.loadNVIDIAKey() {

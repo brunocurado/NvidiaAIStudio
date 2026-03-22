@@ -1,4 +1,28 @@
 import SwiftUI
+import AppKit
+
+/// NSVisualEffectView wrapper — allows smooth alpha control of the blur/vibrancy
+/// material that SwiftUI's .ultraThinMaterial cannot expose directly.
+struct VisualEffectBackground: NSViewRepresentable {
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+    var material: NSVisualEffectView.Material = .underWindowBackground
+    var alphaValue: CGFloat = 1.0
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.blendingMode = blendingMode
+        v.material = material
+        v.state = .active
+        v.alphaValue = alphaValue
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.blendingMode = blendingMode
+        nsView.material = material
+        nsView.alphaValue = alphaValue
+    }
+}
 
 /// Main 3-column layout matching the reference app design.
 struct ContentView: View {
@@ -7,23 +31,26 @@ struct ContentView: View {
     @AppStorage("glassBlur") private var glassBlur: Double = 20.0
     @State private var showGitPanel = false
     @State private var showCloneSheet = false
-    
+
     var body: some View {
         ZStack {
-            // Fundo glassmorphism: o ultraThinMaterial deixa ver o wallpaper
-            // através da janela (blur nativo do macOS sobre o desktop).
-            // glassOpacity controla a opacidade do tint de cor.
-            // glassBlur controla quanto o material "fecha" — via opacidade do overlay branco.
-            Color.clear
-                .background(.ultraThinMaterial)
+            // Glassmorphism background via native NSVisualEffectView.
+            // glassOpacity slider (0–1) maps directly to the view's alphaValue:
+            //   1.0 = fully opaque frosted material
+            //   0.0 = completely transparent (no material at all)
+            // This gives a perfectly smooth, linear fade with no cliff edges.
+            VisualEffectBackground(alphaValue: CGFloat(glassOpacity))
                 .ignoresSafeArea()
+            // Dark tint layer — scales with opacity so it also fades out cleanly
             Color(red: 0.06, green: 0.06, blue: 0.16)
-                .opacity(glassOpacity)
+                .opacity(glassOpacity * 0.6)
                 .ignoresSafeArea()
-            // O slider de blur fecha gradualmente o material (0 = totalmente translúcido, 50 = quase opaco)
-            Color.white
-                .opacity(glassBlur / 50.0 * 0.45)
-                .ignoresSafeArea()
+            // Frosted overlay
+            if glassBlur > 0 {
+                Color.white
+                    .opacity(glassBlur / 50.0 * 0.35)
+                    .ignoresSafeArea()
+            }
 
             HSplitView {
                 // Left: Sidebar
@@ -57,6 +84,9 @@ struct ContentView: View {
         .sheet(isPresented: $showGitPanel) {
             GitPanelView()
                 .environment(appState)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .openGitPanel)) { _ in
+            showGitPanel = true
         }
         .sheet(isPresented: $showCloneSheet) {
             CloneRepoView()

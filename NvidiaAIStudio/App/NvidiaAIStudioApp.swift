@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct NvidiaAIStudioApp: App {
@@ -53,6 +54,56 @@ struct NvidiaAIStudioApp: App {
         Settings {
             SettingsView()
                 .environment(appState)
+        }
+        
+        // MARK: - Keyboard Shortcuts (global commands)
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("New Thread") {
+                    let _ = appState.createSession()
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                
+                Button("Open Workspace") {
+                    // Post notification picked up by SidebarView
+                    NotificationCenter.default.post(name: .openWorkspacePicker, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: [.command, .shift])
+            }
+            CommandGroup(replacing: .help) {
+                Button("Commit & Push") {
+                    NotificationCenter.default.post(name: .openGitPanel, object: nil)
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+        }
+    }
+}
+
+// MARK: - Notification names for keyboard shortcuts
+extension Notification.Name {
+    static let openWorkspacePicker = Notification.Name("openWorkspacePicker")
+    static let openGitPanel = Notification.Name("openGitPanel")
+    static let responseCompleted = Notification.Name("responseCompleted")
+}
+
+// MARK: - Notification helper
+enum AppNotifications {
+    static func requestPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+    
+    static func sendResponseCompleted(modelName: String) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized else { return }
+            // Only notify if app is in background
+            guard NSApp.isHidden || NSApp.mainWindow?.isKeyWindow == false else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Response ready"
+            content.body = "\(modelName) finished responding"
+            content.sound = .default
+            let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
         }
     }
 }

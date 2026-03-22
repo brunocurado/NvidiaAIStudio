@@ -12,6 +12,8 @@ struct SidebarView: View {
     @State private var renamingProject: String? = nil
     @State private var renameText = ""
     @State private var showUsagePanel = false
+    @State private var renamingSession: Session? = nil
+    @State private var renameSessionText = ""
     
     // Group sessions by project path
     private var groupedSessions: [(project: String, sessions: [Session])] {
@@ -109,9 +111,12 @@ struct SidebarView: View {
                             },
                             onRenameFolder: { oldName, newName in
                                 appState.renameProject(from: oldName, to: newName)
-                                // Update expanded set
                                 expandedProjects.remove(oldName)
                                 expandedProjects.insert(newName)
+                            },
+                            onRenameThread: { session in
+                                renamingSession = session
+                                renameSessionText = session.title
                             }
                         )
                     }
@@ -145,8 +150,28 @@ struct SidebarView: View {
         .sheet(isPresented: $showSkillsPanel) {
             SkillsPanelView()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .openWorkspacePicker)) { _ in
+            openWorkspacePicker()
+        }
         .sheet(isPresented: $showUsagePanel) {
             UsagePanelView()
+        }
+        .alert("Rename Thread", isPresented: Binding(
+            get: { renamingSession != nil },
+            set: { if !$0 { renamingSession = nil } }
+        )) {
+            TextField("Thread name", text: $renameSessionText)
+            Button("Rename") {
+                if let session = renamingSession, !renameSessionText.isEmpty {
+                    if let idx = appState.sessions.firstIndex(where: { $0.id == session.id }) {
+                        appState.sessions[idx].title = renameSessionText
+                        appState.saveActiveSession()
+                    }
+                }
+                renamingSession = nil
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { renamingSession = nil }
         }
     }
     
@@ -184,6 +209,7 @@ struct ProjectFolderView: View {
     let onHover: (UUID, Bool) -> Void
     let onDelete: (UUID) -> Void
     var onRenameFolder: ((String, String) -> Void)? = nil
+    var onRenameThread: ((Session) -> Void)? = nil
     
     @State private var isRenamingFolder = false
     @State private var folderRenameText = ""
@@ -258,8 +284,9 @@ struct ProjectFolderView: View {
                         onHover(session.id, isHovered)
                     }
                     .contextMenu {
-                        Button("Rename") { /* TODO */ }
-                        Button("Duplicate") { /* TODO */ }
+                        Button("Rename") {
+                            onRenameThread?(session)
+                        }
                         Divider()
                         Button("Delete", role: .destructive) {
                             onDelete(session.id)
@@ -306,6 +333,10 @@ struct ThreadItemView: View {
     let session: Session
     let isSelected: Bool
     let isHovered: Bool
+    var onRename: ((String) -> Void)? = nil
+    var onDuplicate: (() -> Void)? = nil
+    @State private var isRenaming = false
+    @State private var renameText = ""
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

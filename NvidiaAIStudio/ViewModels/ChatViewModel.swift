@@ -232,6 +232,12 @@ final class ChatViewModel {
                     if accumulatedContent.isEmpty && accumulatedToolCalls == nil {
                         appState.showToast("Empty response from model", level: .warning)
                     }
+                    // Notify user if app is in background
+                    let cleanName = String(model.name
+                        .drop(while: { !$0.isLetter && !$0.isNumber }))
+                        .components(separatedBy: "—").first?
+                        .trimmingCharacters(in: .whitespaces) ?? model.name
+                    AppNotifications.sendResponseCompleted(modelName: cleanName)
                 }
                 return
                 

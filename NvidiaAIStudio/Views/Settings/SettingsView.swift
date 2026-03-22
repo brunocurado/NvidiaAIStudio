@@ -254,21 +254,14 @@ struct GeneralSettingsView: View {
                 
                 VStack(spacing: 12) {
                     HStack {
-                        Text("Transparency")
+                        Text("Opacity")
                             .font(.caption)
                             .frame(width: 90, alignment: .leading)
-                        // Slider invertido: mais para a direita = mais transparente
-                        // Internamente: glassOpacity alto = mais cor/tint = menos transparente
-                        // Por isso invertemos o binding: slider 100% → glassOpacity 0, slider 0% → glassOpacity 0.8
-                        Slider(
-                            value: Binding(
-                                get: { 1.0 - (glassOpacity / 0.8) },
-                                set: { glassOpacity = (1.0 - $0) * 0.8 }
-                            ),
-                            in: 0.0...1.0,
-                            step: 0.05
-                        )
-                        Text("\(Int((1.0 - glassOpacity / 0.8) * 100))%")
+                        // glassOpacity mapeia directamente para NSVisualEffectView.alphaValue
+                        // 0 = totalmente transparente, 0.8 = opaco
+                        // Slider: esquerda = transparente, direita = opaco
+                        Slider(value: $glassOpacity, in: 0.0...0.8, step: 0.05)
+                        Text("\(Int(glassOpacity / 0.8 * 100))%")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .frame(width: 35)
@@ -285,7 +278,7 @@ struct GeneralSettingsView: View {
                             .frame(width: 35)
                     }
                     
-                    Text("Higher transparency = more see-through. Higher frosted = more opaque glass.")
+                    Text("Opacity 0% = fully transparent window. Higher frosted = more milky glass.")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }

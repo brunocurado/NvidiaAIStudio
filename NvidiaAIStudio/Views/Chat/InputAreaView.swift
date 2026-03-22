@@ -226,6 +226,35 @@ struct InputAreaView: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(.white.opacity(0.1), lineWidth: 1)
         )
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    guard let data = try? Data(contentsOf: url) else { return }
+                    let filename = url.lastPathComponent
+                    let ext = url.pathExtension.lowercased()
+                    var mimeType: String
+                    switch ext {
+                    case "png": mimeType = "image/png"
+                    case "jpg", "jpeg": mimeType = "image/jpeg"
+                    case "gif": mimeType = "image/gif"
+                    case "webp": mimeType = "image/webp"
+                    case "pdf": mimeType = "application/pdf"
+                    case "json": mimeType = "application/json"
+                    default: mimeType = "text/plain"
+                    }
+                    let attachment = Message.Attachment(
+                        filename: filename,
+                        mimeType: mimeType,
+                        data: data.base64EncodedString()
+                    )
+                    DispatchQueue.main.async {
+                        pendingAttachments.append(attachment)
+                    }
+                }
+            }
+            return true
+        }
         .onAppear {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 isFocused = true
