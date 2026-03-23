@@ -21,7 +21,6 @@ struct NvidiaAIStudioApp: App {
                     .environment(appState)
                     .opacity(showSplash ? 0 : 1)
                 
-                
                 if showSplash {
                     SplashScreenView(isFinished: $showSplash)
                 }
@@ -35,7 +34,6 @@ struct NvidiaAIStudioApp: App {
             .preferredColorScheme(colorScheme)
             .onAppear {
                 appState.bootstrap()
-                // Show onboarding only if no API keys are configured
                 if appState.apiKeys.isEmpty {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         showOnboarding = true
@@ -43,14 +41,8 @@ struct NvidiaAIStudioApp: App {
                 }
                 NSApp.activate(ignoringOtherApps: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    if let window = NSApp.windows.first {
-                        window.makeKeyAndOrderFront(nil)
-                        window.isOpaque = false
-                        window.backgroundColor = .clear
-                        window.titlebarAppearsTransparent = true
-                        window.titleVisibility = .hidden
-                        window.styleMask.insert(.fullSizeContentView)
-                    }
+                    guard let window = NSApp.windows.first else { return }
+                    AppWindowStyler.shared.install(on: window)
                 }
             }
         }
@@ -84,11 +76,50 @@ struct NvidiaAIStudioApp: App {
     }
 }
 
+// MARK: - Window Styler
+
+/// Applies transparent titlebar styling and reapplies it after fullscreen transitions.
+final class AppWindowStyler: NSObject, NSWindowDelegate {
+    static let shared = AppWindowStyler()
+
+    func install(on window: NSWindow) {
+        applyStyle(to: window)
+        window.delegate = self
+    }
+
+    private func applyStyle(to window: NSWindow) {
+        window.makeKeyAndOrderFront(nil)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.styleMask.insert(.fullSizeContentView)
+        // Hide the toolbar separator line
+        window.toolbar?.showsBaselineSeparator = false
+    }
+
+    // Reapply after entering fullscreen — macOS resets transparency
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        DispatchQueue.main.async { self.applyStyle(to: window) }
+    }
+
+    // Reapply after exiting fullscreen
+    func windowDidExitFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        DispatchQueue.main.async { self.applyStyle(to: window) }
+    }
+}
+
+// MARK: - Notification names
+
 extension Notification.Name {
     static let openWorkspacePicker = Notification.Name("openWorkspacePicker")
     static let openGitPanel = Notification.Name("openGitPanel")
     static let responseCompleted = Notification.Name("responseCompleted")
 }
+
+// MARK: - Notifications helper
 
 enum AppNotifications {
     static func requestPermission() {
@@ -108,6 +139,8 @@ enum AppNotifications {
         }
     }
 }
+
+// MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
