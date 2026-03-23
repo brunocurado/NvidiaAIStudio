@@ -171,7 +171,7 @@ final class OpenAIAPIService: AIProvider {
             let content = delta["content"] as? String
 
             // OpenAI reasoning models stream reasoning via "reasoning" key
-            var reasoning: String? = delta["reasoning"] as? String
+            let reasoning: String? = delta["reasoning"] as? String
 
             // Tool calls
             var toolCalls: [Message.ToolCall]?

@@ -203,7 +203,7 @@ final class MCPConnection: Identifiable {
     private func readStdioOutput() async {
         guard let outPipe = outputPipe else { return }
         let handle = outPipe.fileHandleForReading
-        while let data = try? handle.availableData, !data.isEmpty {
+        while case let data = handle.availableData, !data.isEmpty {
             if let text = String(data: data, encoding: .utf8) {
                 buffer += text
                 processBuffer()
@@ -291,7 +291,11 @@ final class MCPConnection: Identifiable {
             "capabilities": ["tools": [:]],
             "clientInfo": ["name": "NvidiaAIStudio", "version": "2.0.0"]
         ])
-        _ = try await sendRequest(method: "notifications/initialized")
+        let notifMsg: [String: Any] = ["jsonrpc": "2.0", "method": "notifications/initialized", "params": [:]]
+        let notifData = try! JSONSerialization.data(withJSONObject: notifMsg)
+        if let line = String(data: notifData, encoding: .utf8) {
+            inputPipe?.fileHandleForWriting.write((line + "\n").data(using: .utf8)!)
+        }
     }
 
     // MARK: - Tools

@@ -1,9 +1,9 @@
 # Nvidia AI Studio
 
-> A native macOS AI coding assistant powered by NVIDIA NIM — with agentic file access, GitHub integration, and a glassmorphism interface built entirely in SwiftUI.
+> A native macOS AI coding assistant powered by NVIDIA NIM — with agentic file access, GitHub integration, and Apple's Liquid Glass interface built entirely in Swift.
 
-![macOS](https://img.shields.io/badge/macOS-14.0+-black?style=flat-square&logo=apple)
-![Swift](https://img.shields.io/badge/Swift-5.9-orange?style=flat-square&logo=swift)
+![macOS](https://img.shields.io/badge/macOS-26.0+(Tahoe)-black?style=flat-square&logo=apple)
+![Swift](https://img.shields.io/badge/Swift-6.2-orange?style=flat-square&logo=swift)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)
 ![Version](https://img.shields.io/badge/version-2.0.0-green?style=flat-square)
 
@@ -25,16 +25,22 @@ It connects to the **NVIDIA NIM API**, giving you access to over 16 frontier mod
 
 ## Features
 
-### 🤖 Multi-Model Support
-Switch between 16+ frontier models mid-conversation. Each model is labelled with its capabilities:
-- 🔮 **DeepSeek V3.2** — Top reasoning, 128K context
-- 🌙 **Kimi K2.5** — Fast, 256K context
-- 💻 **Qwen3 Coder 480B** — Best-in-class code generation
-- 👁️ **Vision models** — Attach images directly to your messages
-- 🧠 **Thinking models** — Extended reasoning with configurable depth (Low / Medium / High)
+### 🤖 Multi-Model & Multi-Provider Support
+Switch between 16+ frontier models mid-conversation. Supports multiple AI providers:
 
-### 🛠️ Agentic Skills
-The AI can take real actions on your Mac through a set of built-in skills:
+| Provider | Models | Highlights |
+|----------|--------|------------|
+| **NVIDIA NIM** | DeepSeek V3.2, Kimi K2.5, Qwen3 Coder 480B, Llama 3.3, Mistral, etc. | Free preview, 128K–256K context |
+| **Anthropic** | Claude 4 Sonnet, Claude 4 Opus | Best reasoning |
+| **OpenAI** | GPT-4o, GPT-4o-mini | Vision + function calling |
+| **Custom** | Any OpenAI-compatible endpoint | Self-hosted models |
+
+Each model is labelled with its capabilities:
+- 👁️ **Vision models** — Attach images directly to your messages
+- 🧠 **Thinking models** — Extended reasoning with configurable depth (Low / Medium / High / Off)
+
+### 🛠️ Agentic Skills (Tool Calling)
+The AI can take real actions on your Mac through a set of built-in skills with an **autonomous agent loop** (up to 10 iterations):
 
 | Skill | What it does |
 |---|---|
@@ -46,42 +52,81 @@ The AI can take real actions on your Mac through a set of built-in skills:
 | `git` | Run any git operation |
 | `ssh_command` | Execute commands on a remote VPS |
 | `image_generation` | Generate images via NVIDIA NIM |
+| `fetch_images` | Fetch and inject images for vision-capable models |
+| `web_search` / `web_fetch` | Search the web and fetch page content |
+
+Tool calls are displayed as **GlassCode-style inline pills** showing the tool name, edited filename, `+additions` / `-deletions` diff stats, and expandable results.
 
 ### 🔒 Full Access vs Sandboxed Mode
 Control how much of your system the AI can see:
 - **Full Access** — the AI can read, write, and run commands anywhere on your Mac
-- **Sandboxed** — restricted to the active workspace folder you choose; all file operations outside that folder are blocked at the skill level
+- **Sandboxed** — restricted to the active workspace folder; all file operations outside that folder are blocked at the skill level
 
-Switch modes live at any point in a conversation from the toolbar.
+Switch modes live at any point in a conversation from the bottom toolbar.
 
 ### 📁 Workspace Management
 - **Open Workspace** — pick any project folder as your working context
 - Sessions are grouped by project in the sidebar
-- Rename project folders directly from the sidebar (right-click)
+- **Right-click context menu** on folders: New Thread, Rename, Remove Workspace
+- **Show less / Show more** to collapse folder listings
 - New threads automatically inherit the active workspace path
+- **Export threads** as `.txt` via the share button
 
 ### 🐙 GitHub Integration
-Connect your GitHub account with a Personal Access Token:
+Connect your GitHub account via OAuth Device Flow or Personal Access Token:
+
+**Setup:**
 1. Click **Settings → GitHub**
-2. Click **Open GitHub → New Token** (opens the page with scopes pre-filled)
-3. Paste the token and click **Connect**
+2. Click **Connect with GitHub** (opens Device Flow) or paste a Personal Access Token
+3. Authorize the app on github.com
 
-Once connected:
-- **Clone Repository** — browse all your repos and clone with one click, authenticated via HTTPS
-- **Commit & Push** — see changed files, write a commit message, and push — no Terminal needed
-- Token is stored securely in the macOS Keychain
+**Once connected:**
+- **Clone Repository** — browse all your repos and clone with one click
+- **Commit & Push** — see changed files with diff stats, write a commit message, and push — no Terminal needed
+- Token is stored securely in the **macOS Keychain**
 
-### 🎨 Glassmorphism UI
-- Translucent window with adjustable transparency and frosted glass effect
-- Dark / Light / System theme
-- Smooth animations throughout
-- Sidebar with collapsible project folders and thread search
+### 🪟 Apple Liquid Glass UI
+Built natively with macOS 26 Tahoe's **Liquid Glass** design language:
+- `.glassEffect()` used throughout — sidebar, message bubbles, input area, toolbar, tool call pills, toasts
+- `.buttonStyle(.glass)` for all toolbar buttons
+- Translucent window with adjustable **opacity** and **blur** sliders in Settings
+- **7 built-in color themes**: Dark, Midnight, Ocean, Forest, Sunset, Nord, Light
+- Smooth spring animations on panels, messages, and state transitions
+
+### 💬 Premium Chat Experience
+- **Markdown rendering** — full GFM with syntax-highlighted code blocks, headings, lists, blockquotes
+- **"Worked for Xm Ys"** timing badge after each assistant response
+- **Inline diff pills** — "Edited `filename.swift` +14 -5 >" for file edit tool calls
+- **Streaming dots** animation while the model is generating
+- **Collapsible reasoning** — see the model's chain-of-thought with character count
+- **User & assistant avatars** with subtle glow circles
+- **Context compression** — auto-summarizes older messages when context usage exceeds 80%
+- **Context usage indicator** — circular ring showing how much of the model's context window is used
+
+### 📊 Usage Tracking
+- Track token usage per model, session, and provider
+- View total prompt/completion tokens over time
+- Available from the sidebar **Usage** panel or the **Tokens** toolbar button
+
+### ⚡ Background Agents
+- Multiple agents can work in the background
+- Live badge counter on the **Agents** toolbar button
+- Floating panel in the chat view shows running agents
+
+### 🔔 Native Notifications
+- Desktop notification when a response completes (with model name)
+- Permission requested on first launch
+
+### 🔌 MCP (Model Context Protocol) Support
+- Configure external MCP servers in **Settings → MCP**
+- Auto-connect on app launch
+- Extend the app's capabilities with custom tool servers
 
 ---
 
 ## Requirements
 
-- macOS 14.0 (Sonoma) or later
+- **macOS 26.0 (Tahoe)** or later — required for Liquid Glass APIs
 - Apple Silicon or Intel Mac
 - A free [NVIDIA NIM API key](https://build.nvidia.com)
 
@@ -111,8 +156,8 @@ bash build_app.sh release
 ```
 
 **Requirements for building:**
-- Xcode Command Line Tools (`xcode-select --install`)
-- Swift 5.9+
+- Xcode 26+ with Swift 6.2
+- macOS 26.0 (Tahoe)
 
 ---
 
@@ -128,49 +173,54 @@ The free tier includes generous usage limits across all available models.
 
 ---
 
-## GitHub Integration Setup
-
-To enable the GitHub OAuth Browser flow (optional, for users who prefer not to use a PAT):
-
-1. Register a free OAuth App at [github.com/settings/applications/new](https://github.com/settings/applications/new)
-2. Set the Homepage URL to your repo
-3. Enable **Device Flow**
-4. Copy the **Client ID** and replace `deviceFlowClientID` in `Services/GitHubService.swift`
-
-For most users, the **Personal Access Token** method in Settings → GitHub is simpler and works out of the box.
-
----
-
 ## Project Structure
 
 ```
 NvidiaAIStudio/
 ├── App/
-│   ├── NvidiaAIStudioApp.swift    # Entry point, window config
+│   ├── NvidiaAIStudioApp.swift    # Entry point, window config, Liquid Glass
 │   └── AppState.swift             # Global observable state
 ├── Models/
-│   ├── AIModel.swift              # Model definitions + defaults
+│   ├── AIModel.swift              # Model definitions + multi-provider defaults
+│   ├── AppTheme.swift             # 7 color themes + glass effect config
 │   ├── Message.swift              # Chat message + tool call types
-│   └── Session.swift              # Conversation session
+│   ├── Session.swift              # Conversation session with project grouping
+│   └── SystemPrompt.swift         # Dynamic system prompt with workspace context
 ├── Services/
 │   ├── NVIDIAAPIService.swift     # Streaming API client (OpenAI-compatible)
+│   ├── OpenAIAPIService.swift     # OpenAI/Anthropic provider
 │   ├── ModelFetcher.swift         # Live model list from NVIDIA NIM
-│   └── GitHubService.swift        # OAuth + REST + clone/push
+│   ├── GitHubService.swift        # OAuth Device Flow + REST API
+│   └── MCPManager.swift           # Model Context Protocol server manager
 ├── Skills/
 │   ├── Skill.swift                # Protocol + SkillRegistry + sandbox enforcement
-│   ├── FileSkills.swift           # read_file, write_file, list_directory, search, run_command
-│   ├── GitSkill.swift             # git operations
-│   ├── SSHSkill.swift             # ssh_command
+│   ├── FileSkills.swift           # File operations + shell commands
+│   ├── GitSkill.swift             # Git operations
+│   ├── SSHSkill.swift             # Remote SSH execution
+│   ├── WebSkills.swift            # Web search + fetch
 │   └── ImageGenerationSkill.swift # NVIDIA image generation
 ├── ViewModels/
-│   └── ChatViewModel.swift        # Agentic loop, streaming, tool execution
+│   └── ChatViewModel.swift        # Agent loop, streaming, tool execution, context compression
+├── Utilities/
+│   └── KeychainHelper.swift       # Secure storage for API keys + GitHub tokens
 └── Views/
-    ├── ContentView.swift           # Main 3-column layout
-    ├── Chat/                       # ChatView, InputAreaView, MessageBubbleView
-    ├── Sidebar/                    # SidebarView with project folders
-    ├── Settings/                   # All settings tabs including GitHub
+    ├── ContentView.swift           # Main 3-column layout + toolbar
+    ├── OnboardingView.swift        # First-launch setup
+    ├── Chat/
+    │   ├── ChatView.swift          # Message list + background agents panel
+    │   ├── InputAreaView.swift     # Rich input with attachments + model picker
+    │   └── MessageBubbleView.swift # Markdown bubbles, tool pills, timing badges
+    ├── Sidebar/
+    │   └── SidebarView.swift       # Threads, workspaces, skills, usage, settings
+    ├── Settings/
+    │   └── SettingsView.swift      # API Keys, GitHub, Theme, Models, MCP tabs
+    ├── RightPanel/
+    │   └── RightPanelView.swift    # Git diff viewer + terminal
+    ├── Components/
+    │   └── ToastView.swift         # Notification toasts
     ├── GitPanelView.swift          # Commit & Push panel
-    └── CloneRepoView.swift         # Repository browser + clone
+    ├── CloneRepoView.swift         # Repository browser + clone
+    └── SkillsPanelView.swift       # Skills toggle panel
 ```
 
 ---
@@ -182,7 +232,6 @@ NvidiaAIStudio/
 | Send message | `Enter` |
 | New line in message | `Shift + Enter` |
 | Commit & Push (in Git panel) | `Cmd + Enter` |
-| Toggle sidebar | Toolbar button |
 | Open settings | `Cmd + ,` |
 
 ---
@@ -227,4 +276,5 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgements
 
-Built with [NVIDIA NIM](https://build.nvidia.com) — access to world-class AI models through a single OpenAI-compatible API.
+- Built with [NVIDIA NIM](https://build.nvidia.com) — access to world-class AI models through a single OpenAI-compatible API.
+- Designed with Apple's **Liquid Glass** design language on macOS 26 Tahoe.

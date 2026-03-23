@@ -22,9 +22,9 @@ struct AppTheme: Identifiable, Equatable {
         name: "Dark",
         icon: "moon.fill",
         colorScheme: .dark,
-        backgroundTint: Color(red: 0.06, green: 0.06, blue: 0.16),
-        sidebarTint: Color(red: 0.08, green: 0.08, blue: 0.18),
-        accentColor: .blue,
+        backgroundTint: Color(red: 0.05, green: 0.07, blue: 0.12),
+        sidebarTint: Color(red: 0.06, green: 0.08, blue: 0.14),
+        accentColor: Color(red: 0.0, green: 0.75, blue: 1.0),
         codeBackground: Color.black.opacity(0.4)
     )
 

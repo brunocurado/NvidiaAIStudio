@@ -1,71 +1,73 @@
 import SwiftUI
 import AppKit
 
-/// NSVisualEffectView wrapper — allows smooth alpha control of the blur/vibrancy
-/// material that SwiftUI's .ultraThinMaterial cannot expose directly.
-struct VisualEffectBackground: NSViewRepresentable {
-    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
-    var material: NSVisualEffectView.Material = .underWindowBackground
-    var alphaValue: CGFloat = 1.0
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.blendingMode = blendingMode
-        v.material = material
-        v.state = .active
-        v.alphaValue = alphaValue
-        return v
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.blendingMode = blendingMode
-        nsView.material = material
-        nsView.alphaValue = alphaValue
-    }
-}
-
-/// Main 3-column layout matching the reference app design.
 struct ContentView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage("appThemeID") private var appThemeID: String = "dark"
     @AppStorage("glassOpacity") private var glassOpacity: Double = 0.25
     @AppStorage("glassBlur") private var glassBlur: Double = 20.0
-    @AppStorage("appThemeID") private var appThemeID: String = "dark"
+    var showSplash: Bool = false
     @State private var showGitPanel = false
     @State private var showCloneSheet = false
+    @State private var showUsagePanel = false
 
     private var theme: AppTheme { AppTheme.find(id: appThemeID) }
 
     var body: some View {
         ZStack {
-            VisualEffectBackground(alphaValue: CGFloat(glassOpacity))
-                .ignoresSafeArea()
+            // Fundo base — escuro profundo como o GlassCode
             theme.backgroundTint
-                .opacity(glassOpacity * 0.6)
+                .opacity(max(0.85, glassOpacity * 0.6 + 0.75))
                 .ignoresSafeArea()
+
+            // Glow ambient — canto superior esquerdo (cyan/teal)
+            RadialGradient(
+                colors: [
+                    theme.accentColor.opacity(0.5),
+                    Color.clear
+                ],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 600
+            )
+            .ignoresSafeArea()
+
+            // Glow ambient — canto inferior direito
+            RadialGradient(
+                colors: [
+                    theme.accentColor.opacity(0.3),
+                    Color.clear
+                ],
+                center: .bottomTrailing,
+                startRadius: 0,
+                endRadius: 450
+            )
+            .ignoresSafeArea()
+
+            // Frosted wash subtil
             if glassBlur > 0 {
                 Color.white
-                    .opacity(glassBlur / 50.0 * 0.35)
+                    .opacity(glassBlur / 50.0 * 0.04)
                     .ignoresSafeArea()
             }
 
             HSplitView {
-                // Left: Sidebar
                 if appState.isSidebarVisible {
                     SidebarView()
-                        .frame(minWidth: 220, idealWidth: 280, maxWidth: 360)
+                        .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+                        .background(.ultraThinMaterial.opacity(0.3))
                 }
-                
-                // Center: Chat area
+
                 ChatView()
                     .frame(minWidth: 400)
-                
-                // Right: Diff/Terminal panel
+
                 if appState.isRightPanelVisible {
                     RightPanelView()
                         .frame(minWidth: 300, idealWidth: 400, maxWidth: 600)
+                        .background(.ultraThinMaterial.opacity(0.3))
                 }
             }
-            
+
             // Toast overlay
             VStack {
                 ForEach(appState.toasts) { toast in
@@ -88,47 +90,79 @@ struct ContentView: View {
             CloneRepoView()
                 .environment(appState)
         }
+        .sheet(isPresented: $showUsagePanel) {
+            UsagePanelView()
+        }
+        .toolbar(showSplash ? .hidden : .visible, for: .windowToolbar)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.spring(duration: 0.25)) {
                         appState.isSidebarVisible.toggle()
                     }
                 } label: {
                     Image(systemName: "sidebar.left")
                 }
+                .buttonStyle(.glass)
                 .help("Toggle Sidebar")
-                
+
                 Spacer()
-                
+
                 Button {
                     showGitPanel = true
                 } label: {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: "arrow.up.circle.fill")
                         Text("Commit")
+                            .fontWeight(.semibold)
                     }
+                    .foregroundStyle(theme.accentColor)
                 }
-                .help("Commit & Push Changes")
-                
+                .buttonStyle(.glass)
+                .help("Commit & Push")
+
                 Button {
                     showCloneSheet = true
                 } label: {
                     Image(systemName: "square.and.arrow.down.fill")
                 }
+                .buttonStyle(.glass)
                 .help("Clone Repository")
-                
+
                 Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    showUsagePanel = true
+                } label: {
+                    Image(systemName: "doc.text.fill")
+                }
+                .buttonStyle(.glass)
+                .help("Tokens & Usage")
+
+                Button {
+                    withAnimation(.spring(duration: 0.25)) {
                         appState.isRightPanelVisible.toggle()
                     }
                 } label: {
                     Image(systemName: "terminal.fill")
                 }
+                .buttonStyle(.glass)
                 .help("Toggle Terminal/Diff")
+
+                Button { } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "person.2.fill")
+                        if let session = appState.activeSession, !session.backgroundAgents.isEmpty {
+                            Text("\(session.backgroundAgents.count)")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 3)
+                                .background(Capsule().fill(.blue))
+                                .offset(x: 6, y: -4)
+                        }
+                    }
+                }
+                .buttonStyle(.glass)
+                .help("Agents")
             }
         }
     }
 }
-
-

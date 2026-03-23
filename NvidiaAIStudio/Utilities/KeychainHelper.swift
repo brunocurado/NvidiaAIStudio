@@ -68,6 +68,7 @@ enum KeychainHelper {
     }
     
     /// Save an API key to Keychain using its UUID as the key.
+    @discardableResult
     static func saveAPIKey(_ apiKey: APIKey) -> Bool {
         save(key: "apikey-\(apiKey.id.uuidString)", string: apiKey.key)
     }
@@ -78,6 +79,7 @@ enum KeychainHelper {
     }
     
     /// Delete an API key from Keychain.
+    @discardableResult
     static func deleteAPIKey(id: UUID) -> Bool {
         delete(key: "apikey-\(id.uuidString)")
     }

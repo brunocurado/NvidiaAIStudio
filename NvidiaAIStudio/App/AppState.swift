@@ -20,7 +20,6 @@ final class AppState {
     }
     
     // MARK: - Models
-    // Deduplicate on init — prevents crash in saveModelPreferences if defaultModels ever has duplicate IDs
     var availableModels: [AIModel] = {
         var seen = Set<String>()
         return AIModel.defaultModels.filter { seen.insert($0.id).inserted }
@@ -39,7 +38,6 @@ final class AppState {
         apiKeys.first { $0.provider == activeProvider && $0.isActive }?.key
     }
 
-    /// Models for the currently active provider.
     var modelsForActiveProvider: [AIModel] {
         switch activeProvider {
         case .nvidia:    return availableModels.filter { $0.provider == .nvidia }
@@ -49,14 +47,11 @@ final class AppState {
         }
     }
 
-    /// Switch provider and auto-select a sensible default model.
     func switchProvider(_ newProvider: Provider) {
         activeProvider = newProvider
-        // Pick first enabled model of that provider
         if let first = modelsForActiveProvider.first {
             selectedModelID = first.id
         }
-        // Merge provider-specific models into availableModels if not already present
         let toMerge: [AIModel]
         switch newProvider {
         case .anthropic: toMerge = AIModel.anthropicModels
@@ -69,11 +64,76 @@ final class AppState {
             }
         }
     }
+
+    // MARK: - API Keys Persistence
+
+    private static let apiKeysMetadataKey = "savedAPIKeysMetadata"
+
+    /// Persist all API keys: metadata in UserDefaults, secrets in Keychain.
+    func saveAPIKeys() {
+        struct APIKeyMetadata: Codable {
+            let id: UUID
+            let provider: Provider
+            let name: String
+            let isActive: Bool
+            let customBaseURL: String?
+            let createdAt: Date
+        }
+        let metadata = apiKeys.map {
+            APIKeyMetadata(
+                id: $0.id,
+                provider: $0.provider,
+                name: $0.name,
+                isActive: $0.isActive,
+                customBaseURL: $0.customBaseURL,
+                createdAt: $0.createdAt
+            )
+        }
+        if let data = try? JSONEncoder().encode(metadata) {
+            UserDefaults.standard.set(data, forKey: Self.apiKeysMetadataKey)
+        }
+        for key in apiKeys {
+            KeychainHelper.saveAPIKey(key)
+        }
+    }
+
+    /// Load API keys from UserDefaults (metadata) + Keychain (secrets).
+    func loadAPIKeys() {
+        struct APIKeyMetadata: Codable {
+            let id: UUID
+            let provider: Provider
+            let name: String
+            let isActive: Bool
+            let customBaseURL: String?
+            let createdAt: Date
+        }
+        guard
+            let data = UserDefaults.standard.data(forKey: Self.apiKeysMetadataKey),
+            let metadata = try? JSONDecoder().decode([APIKeyMetadata].self, from: data)
+        else { return }
+
+        var loaded: [APIKey] = []
+        for m in metadata {
+            guard let secret = KeychainHelper.loadAPIKey(id: m.id) else { continue }
+            let key = APIKey(
+                id: m.id,
+                provider: m.provider,
+                name: m.name,
+                key: secret,
+                isActive: m.isActive,
+                customBaseURL: m.customBaseURL,
+                createdAt: m.createdAt
+            )
+            loaded.append(key)
+        }
+        if !loaded.isEmpty {
+            apiKeys = loaded
+        }
+    }
     
     // MARK: - Workspaces
     var activeWorkspacePath: String = FileManager.default.currentDirectoryPath
 
-    /// Saved workspace paths the user has opened before.
     var savedWorkspaces: [SavedWorkspace] = {
         guard let data = UserDefaults.standard.data(forKey: "savedWorkspaces"),
               let decoded = try? JSONDecoder().decode([SavedWorkspace].self, from: data)
@@ -97,7 +157,6 @@ final class AppState {
 
     func switchWorkspace(path: String) {
         activeWorkspacePath = path
-        // Update last used date
         if let idx = savedWorkspaces.firstIndex(where: { $0.path == path }) {
             savedWorkspaces[idx].lastUsed = Date()
             persistWorkspaces()
@@ -124,7 +183,6 @@ final class AppState {
     var currentBranch: String = "main"
     var availableBranches: [String] = []
     
-    /// Reads the current git branch from the active workspace.
     func refreshGitBranch() {
         let path = activeWorkspacePath
         Task {
@@ -144,7 +202,6 @@ final class AppState {
         }
     }
     
-    /// Checks out a branch in the active workspace.
     func checkoutBranch(_ branch: String) {
         let path = activeWorkspacePath
         Task {
@@ -166,8 +223,6 @@ final class AppState {
     func showToast(_ message: String, level: ToastMessage.Level = .info) {
         let toast = ToastMessage(message: message, level: level)
         toasts.append(toast)
-        
-        // Auto-dismiss after 4 seconds
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(4))
             toasts.removeAll { $0.id == toast.id }
@@ -184,13 +239,11 @@ final class AppState {
         return session
     }
     
-    /// Rename all sessions that belong to a given project folder name.
     func renameProject(from oldName: String, to newName: String) {
         for i in sessions.indices {
             guard let path = sessions[i].projectPath else { continue }
             let currentName = URL(fileURLWithPath: path).lastPathComponent
             if currentName == oldName {
-                // Replace the last component with the new name
                 let parent = URL(fileURLWithPath: path).deletingLastPathComponent()
                 let newPath = parent.appendingPathComponent(newName).path
                 sessions[i].projectPath = newPath
@@ -207,13 +260,11 @@ final class AppState {
         Task { await sessionStore.delete(id: id) }
     }
     
-    /// Save the current active session to disk.
     func saveActiveSession() {
         guard let session = activeSession else { return }
         Task { await sessionStore.save(session) }
     }
     
-    /// Load persisted sessions from disk.
     func loadSessions() {
         Task {
             let loaded = await sessionStore.loadAll()
@@ -229,14 +280,11 @@ final class AppState {
     // MARK: - GitHub Auth
     
     func startGitHubOAuth() {
-        // GitHub Device Flow: open browser for user code entry
-        // Step 1: Request device & user code from GitHub
         Task {
             await GitHubService.shared.startDeviceFlow { [weak self] username, token in
                 guard let self else { return }
                 self.gitHubUsername = username
                 self.gitHubToken = token
-                // Persist token in Keychain
                 KeychainHelper.save(key: "github-oauth-token", string: token)
                 KeychainHelper.save(key: "github-username", string: username)
                 self.showToast("GitHub connected as @\(username)", level: .success)
@@ -257,29 +305,28 @@ final class AppState {
         gitHubUsername = KeychainHelper.loadString(key: "github-username")
     }
     
-    /// Initialize: load sessions, env-based API key, and fetch live models.
+    /// Initialize: load sessions, API keys, env-based API key fallback, and fetch live models.
     func bootstrap() {
         loadSessions()
         loadGitHubCredentials()
+        loadAPIKeys()
         AppNotifications.requestPermission()
         MCPManager.shared.connectAll()
 
-        // Auto-load API key from .env if no keys configured
         if apiKeys.isEmpty, let envKey = EnvParser.loadNVIDIAKey() {
             let key = APIKey(provider: .nvidia, name: "NVIDIA (from .env)", key: envKey)
             apiKeys.append(key)
+            saveAPIKeys()
         }
         
-        // Restore saved model preferences
         loadModelPreferences()
         
-        // Auto-fetch available models from NVIDIA NIM
         if let apiKey = activeAPIKey {
             Task {
                 if let fetched = await ModelFetcher.fetchModels(apiKey: apiKey) {
                     await MainActor.run {
                         availableModels = ModelFetcher.mergeModels(existing: availableModels, fetched: fetched)
-                        loadModelPreferences() // re-apply saved isEnabled after merge
+                        loadModelPreferences()
                     }
                 }
             }
@@ -288,15 +335,11 @@ final class AppState {
     
     // MARK: - Model Preferences Persistence
     
-    /// Save which models are enabled/disabled to UserDefaults.
     func saveModelPreferences() {
-        // Use merging init to safely handle any duplicate IDs — last value wins.
-        // This never crashes, unlike uniqueKeysWithValues which asserts on duplicates.
         let prefs = Dictionary(availableModels.map { ($0.id, $0.isEnabled) }, uniquingKeysWith: { _, last in last })
         UserDefaults.standard.set(prefs, forKey: "modelPreferences")
     }
     
-    /// Load saved model enabled/disabled from UserDefaults.
     func loadModelPreferences() {
         guard let prefs = UserDefaults.standard.dictionary(forKey: "modelPreferences") as? [String: Bool] else { return }
         for i in availableModels.indices {

@@ -47,8 +47,7 @@ struct SSHSkill: Skill {
         sshCmd += " '\(command.replacingOccurrences(of: "'", with: "'\\''"))'"
         sshCmd += " 2>&1"
         
-        // Timeout after 30s
-        let fullCmd = "timeout 30 \(sshCmd)"
+        let fullCmd = sshCmd
         let result = await ShellHelper.run(fullCmd)
         
         var output = result.output

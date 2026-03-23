@@ -226,11 +226,7 @@ struct BackgroundAgentsPanelView: View {
                 .padding(.vertical, 10)
             }
         }
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(.white.opacity(0.1), lineWidth: 1)
-        )
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
         .sheet(isPresented: $showAgentDetail) {
             if let id = selectedAgentID {
                 AgentDetailView(agentID: id)

@@ -17,15 +17,13 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            // Background
-            VisualEffectBackground(alphaValue: 0.95)
+            Color(red: 0.04, green: 0.04, blue: 0.12)
                 .ignoresSafeArea()
-            Color(red: 0.06, green: 0.06, blue: 0.16)
-                .opacity(0.7)
+            Color.clear
+                .glassEffect(.regular, in: .rect)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Progress dots
                 HStack(spacing: 8) {
                     ForEach(0..<4, id: \.self) { i in
                         Circle()
@@ -38,13 +36,12 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                // Content
                 Group {
                     switch step {
-                    case .welcome:      welcomeStep
+                    case .welcome:        welcomeStep
                     case .chooseProvider: chooseProviderStep
-                    case .addKey:       addKeyStep
-                    case .done:         doneStep
+                    case .addKey:         addKeyStep
+                    case .done:           doneStep
                     }
                 }
                 .transition(.asymmetric(
@@ -54,7 +51,6 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                // Navigation buttons
                 HStack(spacing: 12) {
                     if step != .welcome {
                         Button("Back") { withAnimation { goBack() } }
@@ -113,8 +109,8 @@ struct OnboardingView: View {
                 .padding(.horizontal, 40)
 
             HStack(spacing: 24) {
-                FeaturePill(icon: "brain.fill",         label: "16+ AI Models")
-                FeaturePill(icon: "folder.fill",        label: "File Access")
+                FeaturePill(icon: "brain.fill",            label: "16+ AI Models")
+                FeaturePill(icon: "folder.fill",           label: "File Access")
                 FeaturePill(icon: "arrow.triangle.branch", label: "Git + GitHub")
             }
         }
@@ -157,7 +153,6 @@ struct OnboardingView: View {
                 .font(.title2)
                 .fontWeight(.bold)
 
-            // Provider-specific instructions
             VStack(alignment: .leading, spacing: 8) {
                 switch selectedProvider {
                 case .nvidia:
@@ -233,27 +228,27 @@ struct OnboardingView: View {
 
     private var stepIndex: Int {
         switch step {
-        case .welcome: return 0
+        case .welcome:        return 0
         case .chooseProvider: return 1
-        case .addKey: return 2
-        case .done: return 3
+        case .addKey:         return 2
+        case .done:           return 3
         }
     }
 
     private func goNext() {
         switch step {
-        case .welcome:         step = .chooseProvider
-        case .chooseProvider:  step = .addKey
-        case .addKey:          step = .done
-        case .done:            isPresented = false
+        case .welcome:        step = .chooseProvider
+        case .chooseProvider: step = .addKey
+        case .addKey:         step = .done
+        case .done:           isPresented = false
         }
     }
 
     private func goBack() {
         switch step {
-        case .chooseProvider:  step = .welcome
-        case .addKey:          step = .chooseProvider
-        case .done:            step = .addKey
+        case .chooseProvider: step = .welcome
+        case .addKey:         step = .chooseProvider
+        case .done:           step = .addKey
         default: break
         }
     }
@@ -270,18 +265,17 @@ struct OnboardingView: View {
                 _ = try await service.validateKey()
                 await MainActor.run {
                     let apiKey = APIKey(provider: selectedProvider, name: selectedProvider.rawValue, key: key)
-                    _ = KeychainHelper.saveAPIKey(apiKey)
                     appState.apiKeys.append(apiKey)
+                    appState.saveAPIKeys()
                     appState.switchProvider(selectedProvider)
                     isValidating = false
                     withAnimation { step = .done }
                 }
             } catch {
                 await MainActor.run {
-                    // Accept key even if validation fails (network might be down)
                     let apiKey = APIKey(provider: selectedProvider, name: selectedProvider.rawValue, key: key)
-                    _ = KeychainHelper.saveAPIKey(apiKey)
                     appState.apiKeys.append(apiKey)
+                    appState.saveAPIKeys()
                     appState.switchProvider(selectedProvider)
                     isValidating = false
                     withAnimation { step = .done }

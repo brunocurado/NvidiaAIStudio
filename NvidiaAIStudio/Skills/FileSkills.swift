@@ -269,8 +269,7 @@ struct RunCommandSkill: Skill {
             cmd = "cd '\(expanded)' && \(command)"
         }
         
-        // Timeout: kill after 30 seconds
-        cmd = "timeout 30 \(cmd) 2>&1"
+        cmd = "\(cmd) 2>&1"
         
         let result = await ShellHelper.run(cmd)
         
