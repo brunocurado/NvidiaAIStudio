@@ -266,10 +266,22 @@ struct InputAreaView: View {
                     case "json": mimeType = "application/json"
                     default: mimeType = "text/plain"
                     }
+                    var finalData = data
+                    var finalExt = url.pathExtension.lowercased()
+                    
+                    // Optimize image to keep payload size under strict limits (fixes HTTP 400 errors)
+                    if ["png", "jpg", "jpeg", "heic", "webp"].contains(ext) {
+                        if let optimized = ImageOptimizer.optimize(data: data) {
+                            finalData = optimized.data
+                            mimeType = optimized.mimeType
+                            finalExt = "jpg" // Because it converts to JPEG
+                        }
+                    }
+                    
                     let attachment = Message.Attachment(
-                        filename: filename,
+                        filename: url.deletingPathExtension().appendingPathExtension(finalExt).lastPathComponent,
                         mimeType: mimeType,
-                        data: data.base64EncodedString()
+                        data: finalData.base64EncodedString()
                     )
                     DispatchQueue.main.async {
                         pendingAttachments.append(attachment)
@@ -332,14 +344,65 @@ struct InputAreaView: View {
             default: mimeType = "text/plain"
             }
             
-            let base64 = data.base64EncodedString()
+            var finalData = data
+            var finalExt = url.pathExtension.lowercased()
+            
+            // Optimize image if needed
+            if ["png", "jpg", "jpeg", "heic", "webp"].contains(ext) {
+                if let optimized = ImageOptimizer.optimize(data: data) {
+                    finalData = optimized.data
+                    mimeType = optimized.mimeType
+                    finalExt = "jpg"
+                }
+            }
+            
+            let base64 = finalData.base64EncodedString()
             let attachment = Message.Attachment(
-                filename: filename,
+                filename: url.deletingPathExtension().appendingPathExtension(finalExt).lastPathComponent,
                 mimeType: mimeType,
                 data: base64
             )
             pendingAttachments.append(attachment)
         }
+    }
+}
+
+// MARK: - Image Optimizer Utility
+private enum ImageOptimizer {
+    static func optimize(data: Data, maxDimension: CGFloat = 1200, compressionQuality: CGFloat = 0.8) -> (data: Data, mimeType: String)? {
+        guard let image = NSImage(data: data) else { return nil }
+        
+        let originalSize = image.size
+        var newSize = originalSize
+        
+        let maxDim = max(originalSize.width, originalSize.height)
+        if maxDim > maxDimension {
+            let scale = maxDimension / maxDim
+            newSize = NSSize(width: originalSize.width * scale, height: originalSize.height * scale)
+        }
+        
+        // Skip optimization if image is already small and light
+        if maxDim <= maxDimension && data.count < 1_000_000 {
+            return nil
+        }
+        
+        let resizedImage = NSImage(size: newSize)
+        resizedImage.lockFocus()
+        NSColor.white.set() // Solid white background for PNGs converting to JPEG
+        NSRect(origin: .zero, size: newSize).fill()
+        image.draw(in: NSRect(origin: .zero, size: newSize),
+                   from: NSRect(origin: .zero, size: originalSize),
+                   operation: .sourceOver,
+                   fraction: 1.0)
+        resizedImage.unlockFocus()
+        
+        guard let tiffData = resizedImage.tiffRepresentation,
+              let bitmapData = NSBitmapImageRep(data: tiffData),
+              let jpegData = bitmapData.representation(using: .jpeg, properties: [.compressionFactor: compressionQuality]) else {
+            return nil
+        }
+        
+        return (data: jpegData, mimeType: "image/jpeg")
     }
 }
 
