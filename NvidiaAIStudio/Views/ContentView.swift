@@ -51,22 +51,32 @@ struct ContentView: View {
                     .ignoresSafeArea()
             }
 
-            HSplitView {
+            HStack(spacing: 0) {
                 if appState.isSidebarVisible {
                     SidebarView()
-                        .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+                        .frame(width: 260)
                         .background(.ultraThinMaterial.opacity(0.3))
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    
+                    Divider()
+                        .transition(.opacity)
                 }
 
                 ChatView()
-                    .frame(minWidth: 400)
+                    .frame(maxWidth: .infinity)
 
                 if appState.isRightPanelVisible {
+                    Divider()
+                        .transition(.opacity)
+                    
                     RightPanelView()
-                        .frame(minWidth: 300, idealWidth: 400, maxWidth: 600)
+                        .frame(width: 400)
                         .background(.ultraThinMaterial.opacity(0.3))
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
+            .animation(.spring(duration: 0.4, bounce: 0.12), value: appState.isSidebarVisible)
+            .animation(.spring(duration: 0.4, bounce: 0.12), value: appState.isRightPanelVisible)
 
             // Toast overlay
             VStack {

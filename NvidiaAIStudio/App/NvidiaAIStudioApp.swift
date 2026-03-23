@@ -46,6 +46,7 @@ struct NvidiaAIStudioApp: App {
             }
         }
         .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 1280, height: 800)
         
         Settings {
@@ -88,8 +89,16 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
-        w.toolbarStyle = .unifiedCompact
+        w.toolbarStyle = .unified
+        
+        // Create a transparent toolbar if none exists
+        if w.toolbar == nil {
+            let tb = NSToolbar(identifier: "mainToolbar")
+            w.toolbar = tb
+        }
+        
         w.delegate = shared
+        styleWindow(w)
     }
 
     private static func styleWindow(_ w: NSWindow) {
@@ -98,26 +107,30 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
+        w.toolbarStyle = .unified
 
-        // Torna a toolbar e titlebar completamente transparentes
-        if let toolbar = w.toolbar {
-            toolbar.showsBaselineSeparator = false
-        }
 
-        // Percorre a view hierarchy da titlebar e limpa todos os fundos
+        // Aggressively clear all titlebar container backgrounds
         func clearBackground(_ view: NSView) {
             view.wantsLayer = true
             view.layer?.backgroundColor = CGColor.clear
             view.layer?.borderWidth = 0
+            // Also clear any visual effect views in the titlebar
+            if let effectView = view as? NSVisualEffectView {
+                effectView.state = .inactive
+                effectView.material = .underWindowBackground
+                effectView.alphaValue = 0
+            }
             for sub in view.subviews { clearBackground(sub) }
         }
 
         if let titlebarContainer = w.standardWindowButton(.closeButton)?.superview?.superview {
             clearBackground(titlebarContainer)
         }
-        // Também limpa o contentView pai
         if let frameView = w.contentView?.superview {
-            clearBackground(frameView)
+            // Only clear the frame layers, not the actual content
+            frameView.wantsLayer = true
+            frameView.layer?.backgroundColor = CGColor.clear
         }
     }
 

@@ -2,9 +2,11 @@
 # ============================================================
 # build_app.sh — Build Nvidia AI Studio as a native macOS .app
 # ============================================================
+# ============================================================
 # Usage:
-#   ./build_app.sh          → Debug build
-#   ./build_app.sh release  → Release (optimized) build
+#   ./build_app.sh                → Debug build (version from VERSION file)
+#   ./build_app.sh release        → Release build (version from VERSION file)
+#   ./build_app.sh release 2.0.5  → Release build with explicit version
 #
 # Output: ./build/Nvidia AI Studio.app
 # ============================================================
@@ -12,6 +14,7 @@
 set -euo pipefail
 
 MODE="${1:-debug}"
+VERSION="${2:-}"
 APP_NAME="Nvidia AI Studio"
 BUNDLE_ID="com.nvidia.aistudio"
 PRODUCT_NAME="NvidiaAIStudio"
@@ -20,6 +23,16 @@ APP_DIR="${BUILD_DIR}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_DIR}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
+
+# Resolve version: CLI arg > VERSION file > fallback
+if [ -z "$VERSION" ]; then
+    if [ -f "$(pwd)/VERSION" ]; then
+        VERSION="$(cat "$(pwd)/VERSION" | tr -d '[:space:]')"
+    else
+        VERSION="1.0.0"
+    fi
+fi
+echo "📦 Version: ${VERSION}"
 
 echo "🔨 Building ${APP_NAME} (${MODE})..."
 
@@ -80,11 +93,11 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${VERSION}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>26.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSApplicationCategoryType</key>
