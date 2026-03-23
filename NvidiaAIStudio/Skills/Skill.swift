@@ -132,11 +132,30 @@ enum SkillError: LocalizedError {
 
 enum SkillArgs {
     static func parse(_ arguments: String) throws -> [String: Any] {
-        guard let data = arguments.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw SkillError.invalidArguments("Could not parse JSON: \(arguments)")
+        let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Standard parse
+        if let data = trimmed.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json
         }
-        return json
+        
+        // Fallback 1: model sent a JSON-encoded string (e.g. "\"ls\"" or "\"{'command':'ls'}\"")
+        if trimmed.hasPrefix("\""), trimmed.hasSuffix("\""),
+           let inner = try? JSONSerialization.jsonObject(with: trimmed.data(using: .utf8)!) as? String,
+           let data = inner.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return json
+        }
+        
+        // Fallback 2: model sent a plain string like "ls" — wrap it as {"command":"ls"}
+        // This handles common ssh_command / run_command misuse
+        let bare = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        if !bare.contains("{") && !bare.contains(":") && !bare.isEmpty {
+            return ["command": bare]
+        }
+        
+        throw SkillError.invalidArguments("Could not parse JSON: \(arguments)")
     }
     static func getString(_ args: [String: Any], key: String) throws -> String {
         guard let value = args[key] as? String else {
