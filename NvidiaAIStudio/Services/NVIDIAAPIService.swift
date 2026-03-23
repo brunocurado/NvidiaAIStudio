@@ -64,7 +64,7 @@ final class NVIDIAAPIService: AIProvider {
     private let session: URLSession
     
     // Thinking keyword detection (matches Python chat_worker.py)
-    private let thinkingKeywords = ["deepseek", "kimi", "qwq"]
+    private let thinkingKeywords = ["deepseek-r1", "kimi", "qwq"]
     private let thinkingQwenSuffix = "thinking"
     
     init(apiKey: String, baseURL: String = "https://integrate.api.nvidia.com/v1") {

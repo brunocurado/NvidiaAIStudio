@@ -37,7 +37,9 @@ struct ChatView: View {
                     }
                     .onChange(of: session.messages) {
                         if viewModel.isStreaming {
-                            proxy.scrollTo("streaming-indicator", anchor: .bottom)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                proxy.scrollTo("streaming-indicator", anchor: .bottom)
+                            }
                         } else if let lastID = session.messages.last?.id {
                             proxy.scrollTo(lastID, anchor: .bottom)
                         }
