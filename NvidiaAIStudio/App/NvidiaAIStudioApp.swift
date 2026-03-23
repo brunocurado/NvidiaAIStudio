@@ -97,11 +97,27 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         w.backgroundColor = .clear
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
-        // Esconde todos os views internos da titlebar que ficam pretos
-        if let titlebarView = w.standardWindowButton(.closeButton)?.superview?.superview {
-            titlebarView.wantsLayer = true
-            titlebarView.layer?.backgroundColor = CGColor.clear
-            titlebarView.layer?.opacity = 1.0
+        w.styleMask.insert(.fullSizeContentView)
+
+        // Torna a toolbar e titlebar completamente transparentes
+        if let toolbar = w.toolbar {
+            toolbar.showsBaselineSeparator = false
+        }
+
+        // Percorre a view hierarchy da titlebar e limpa todos os fundos
+        func clearBackground(_ view: NSView) {
+            view.wantsLayer = true
+            view.layer?.backgroundColor = CGColor.clear
+            view.layer?.borderWidth = 0
+            for sub in view.subviews { clearBackground(sub) }
+        }
+
+        if let titlebarContainer = w.standardWindowButton(.closeButton)?.superview?.superview {
+            clearBackground(titlebarContainer)
+        }
+        // Também limpa o contentView pai
+        if let frameView = w.contentView?.superview {
+            clearBackground(frameView)
         }
     }
 
@@ -112,11 +128,12 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
 
     func windowDidEnterFullScreen(_ notification: Notification) {
         guard let w = notification.object as? NSWindow else { return }
-        // Esconde menu bar e toolbar em fullscreen para Liquid Glass puro
         NSApp.presentationOptions = [.autoHideMenuBar, .autoHideToolbar]
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            Self.styleWindow(w)
-        }
+        // Aplica em vários momentos — o macOS restaura valores durante a animação
+        Self.styleWindow(w)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { Self.styleWindow(w) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { Self.styleWindow(w) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { Self.styleWindow(w) }
     }
 
     func windowWillExitFullScreen(_ notification: Notification) {
