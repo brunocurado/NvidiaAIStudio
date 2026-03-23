@@ -38,23 +38,23 @@ struct ChatView: View {
                     .onChange(of: session.messages.count) {
                         withAnimation(.easeOut(duration: 0.3)) {
                             if let lastID = session.messages.last?.id {
-                                proxy.scrollTo(lastID, anchor: .bottom)
+                                proxy.scrollTo(lastID)
                             }
                         }
                     }
                     .onChange(of: viewModel.isStreaming) {
                         if viewModel.isStreaming {
-                            proxy.scrollTo("streaming-indicator", anchor: .bottom)
+                            proxy.scrollTo("streaming-indicator")
                         }
                     }
                     .onAppear {
                         if let lastID = session.messages.last?.id {
-                            proxy.scrollTo(lastID, anchor: .bottom)
+                            proxy.scrollTo(lastID)
                         }
                     }
                     .onChange(of: session.id) {
                         if let lastID = session.messages.last?.id {
-                            proxy.scrollTo(lastID, anchor: .bottom)
+                            proxy.scrollTo(lastID)
                         }
                     }
                 }
