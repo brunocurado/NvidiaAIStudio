@@ -44,10 +44,10 @@ struct AppTheme: Identifiable, Equatable {
         name: "System",
         icon: "circle.lefthalf.filled",
         colorScheme: nil,
-        backgroundTint: Color(red: 0.06, green: 0.06, blue: 0.16),
-        sidebarTint: Color(red: 0.08, green: 0.08, blue: 0.18),
+        backgroundTint: Color(nsColor: .windowBackgroundColor),
+        sidebarTint: Color(nsColor: .controlBackgroundColor),
         accentColor: .blue,
-        codeBackground: Color.black.opacity(0.4)
+        codeBackground: Color(nsColor: .textBackgroundColor)
     )
 
     /// Catppuccin Mocha — popular warm-dark developer theme

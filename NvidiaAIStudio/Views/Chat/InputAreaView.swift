@@ -76,7 +76,7 @@ struct InputAreaView: View {
                 } label: {
                     Image(systemName: viewModel.isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(inputText.isEmpty && !viewModel.isStreaming ? Color.secondary : Color.white)
+                        .foregroundStyle(inputText.isEmpty && !viewModel.isStreaming ? Color.secondary : Color.primary)
                 }
                 .buttonStyle(.plain)
                 .disabled(inputText.isEmpty && !viewModel.isStreaming)
@@ -472,8 +472,8 @@ struct ChatTextEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.drawsBackground = false
         textView.font = .systemFont(ofSize: 14)
-        textView.textColor = .white
-        textView.insertionPointColor = .white
+        textView.textColor = .textColor
+        textView.insertionPointColor = .textColor
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainerInset = NSSize(width: 0, height: 2)
