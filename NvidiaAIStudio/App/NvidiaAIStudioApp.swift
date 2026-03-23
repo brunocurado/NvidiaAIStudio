@@ -41,8 +41,7 @@ struct NvidiaAIStudioApp: App {
                 }
                 NSApp.activate(ignoringOtherApps: true)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    guard let window = NSApp.windows.first else { return }
-                    AppWindowStyler.shared.install(on: window)
+                    AppWindowStyler.apply(to: NSApp.windows.first)
                 }
             }
         }
@@ -78,36 +77,38 @@ struct NvidiaAIStudioApp: App {
 
 // MARK: - Window Styler
 
-/// Applies transparent titlebar styling and reapplies it after fullscreen transitions.
 final class AppWindowStyler: NSObject, NSWindowDelegate {
     static let shared = AppWindowStyler()
 
-    func install(on window: NSWindow) {
-        applyStyle(to: window)
-        window.delegate = self
+    static func apply(to window: NSWindow?) {
+        guard let w = window else { return }
+        w.makeKeyAndOrderFront(nil)
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
+        w.styleMask.insert(.fullSizeContentView)
+        // Remove a toolbar preta em fullscreen
+        w.toolbarStyle = .unified
+        w.delegate = shared
     }
 
-    private func applyStyle(to window: NSWindow) {
-        window.makeKeyAndOrderFront(nil)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.styleMask.insert(.fullSizeContentView)
-        // Hide the toolbar separator line
-        window.toolbar?.showsBaselineSeparator = false
-    }
-
-    // Reapply after entering fullscreen — macOS resets transparency
+    // Reapplica o estilo após entrar em fullscreen
     func windowDidEnterFullScreen(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        DispatchQueue.main.async { self.applyStyle(to: window) }
+        guard let w = notification.object as? NSWindow else { return }
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
+        w.backgroundColor = .clear
+        w.isOpaque = false
     }
 
-    // Reapply after exiting fullscreen
+    // Reapplica após sair de fullscreen
     func windowDidExitFullScreen(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        DispatchQueue.main.async { self.applyStyle(to: window) }
+        guard let w = notification.object as? NSWindow else { return }
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
+        w.backgroundColor = .clear
+        w.isOpaque = false
     }
 }
 
