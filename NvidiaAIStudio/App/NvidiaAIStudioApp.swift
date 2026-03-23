@@ -88,27 +88,44 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
-        // Remove a toolbar preta em fullscreen
-        w.toolbarStyle = .unified
+        w.toolbarStyle = .unifiedCompact
         w.delegate = shared
     }
 
-    // Reapplica o estilo após entrar em fullscreen
-    func windowDidEnterFullScreen(_ notification: Notification) {
-        guard let w = notification.object as? NSWindow else { return }
+    private static func styleWindow(_ w: NSWindow) {
+        w.isOpaque = false
+        w.backgroundColor = .clear
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
-        w.backgroundColor = .clear
-        w.isOpaque = false
+        // Esconde todos os views internos da titlebar que ficam pretos
+        if let titlebarView = w.standardWindowButton(.closeButton)?.superview?.superview {
+            titlebarView.wantsLayer = true
+            titlebarView.layer?.backgroundColor = CGColor.clear
+            titlebarView.layer?.opacity = 1.0
+        }
     }
 
-    // Reapplica após sair de fullscreen
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        guard let w = notification.object as? NSWindow else { return }
+        // Delay necessário — macOS demora a terminar a animação de fullscreen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            Self.styleWindow(w)
+        }
+    }
+
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        guard let w = notification.object as? NSWindow else { return }
+        Self.styleWindow(w)
+    }
+
     func windowDidExitFullScreen(_ notification: Notification) {
         guard let w = notification.object as? NSWindow else { return }
-        w.titlebarAppearsTransparent = true
-        w.titleVisibility = .hidden
-        w.backgroundColor = .clear
-        w.isOpaque = false
+        Self.styleWindow(w)
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        guard let w = notification.object as? NSWindow else { return }
+        Self.styleWindow(w)
     }
 }
 
