@@ -86,9 +86,16 @@ struct MessageBubbleView: View {
                     }
                 }
                 
-                // "Worked for Xm Ys" timing badge (assistant only, non-streaming)
-                if message.role == .assistant && !message.isStreaming && !message.content.isEmpty {
-                    WorkedForBadge(timestamp: message.timestamp)
+                // Timestamp (assistant only, non-streaming)
+                if message.role == .assistant && !message.isStreaming {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 9))
+                        Text(message.timestamp.formatted(date: .omitted, time: .shortened))
+                            .font(.system(size: 10))
+                    }
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .padding(.top, 2)
                 }
                 
                 // Streaming cursor

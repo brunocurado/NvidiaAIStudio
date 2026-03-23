@@ -24,8 +24,11 @@ final class AppState {
         var seen = Set<String>()
         return AIModel.defaultModels.filter { seen.insert($0.id).inserted }
     }()
-    var selectedModelID: String = "deepseek-ai/deepseek-v3.2"
-    
+    var selectedModelID: String = UserDefaults.standard.string(forKey: "savedSelectedModelID") ?? "deepseek-ai/deepseek-v3.2" {
+        didSet {
+            UserDefaults.standard.set(selectedModelID, forKey: "savedSelectedModelID")
+        }
+    }    
     var selectedModel: AIModel? {
         availableModels.first { $0.id == selectedModelID }
     }

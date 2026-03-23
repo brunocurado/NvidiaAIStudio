@@ -47,6 +47,16 @@ struct ChatView: View {
                             proxy.scrollTo("streaming-indicator", anchor: .bottom)
                         }
                     }
+                    .onAppear {
+                        if let lastID = session.messages.last?.id {
+                            proxy.scrollTo(lastID, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: session.id) {
+                        if let lastID = session.messages.last?.id {
+                            proxy.scrollTo(lastID, anchor: .bottom)
+                        }
+                    }
                 }
                 
                 // Background agents panel (floating card)
