@@ -19,7 +19,17 @@ It connects to the **NVIDIA NIM API**, giving you access to over 16 frontier mod
 
 ## Screenshots
 
-> *(Add your own screenshots here)*
+ <img width="1800" height="1130" alt="Captura de ecrã 2026-03-23, às 10 23 56" src="https://github.com/user-attachments/assets/3f2b68fd-7d08-49ed-a254-d050146434de" />
+ <img width="1800" height="1130" alt="Captura de ecrã 2026-03-23, às 10 24 08" src="https://github.com/user-attachments/assets/a5d44572-3ac2-4f5c-9078-c10713355a29" />
+ <img width="611" height="650" alt="Captura de ecrã 2026-03-23, às 10 27 09" src="https://github.com/user-attachments/assets/4ebd49cf-01c7-4cb0-b4b9-eae7fe773c2b" />
+ <img width="409" height="529" alt="Captura de ecrã 2026-03-23, às 10 25 09" src="https://github.com/user-attachments/assets/0b16638f-384b-4a4c-9bf8-f0a8c28288d3" />
+ <img width="611" height="650" alt="Captura de ecrã 2026-03-23, às 10 27 09" src="https://github.com/user-attachments/assets/cf6d6cad-5682-41d8-9cd8-a9fd9d49f0ac" />
+ <img width="611" height="641" alt="Captura de ecrã 2026-03-23, às 10 27 02" src="https://github.com/user-attachments/assets/7ada1729-29c7-4970-ab89-bb185872a24a" />
+ <img width="620" height="644" alt="Captura de ecrã 2026-03-23, às 10 28 57" src="https://github.com/user-attachments/assets/aa6301f0-1f50-48f4-aac0-a43c39aa9a6c" />
+ <img width="512" height="467" alt="Captura de ecrã 2026-03-23, às 10 26 27" src="https://github.com/user-attachments/assets/bcfc2998-30f0-4d62-958f-70537937373b" />
+ <img width="616" height="553" alt="Captura de ecrã 2026-03-23, às 10 27 28" src="https://github.com/user-attachments/assets/a389f71e-fd78-44f9-a1a8-fb960f1e5f74" />
+ <img width="641" height="654" alt="Captura de ecrã 2026-03-23, às 10 27 15" src="https://github.com/user-attachments/assets/f810b171-3881-41ee-8cbd-69e94a05765a" />
+
 
 ---
 
