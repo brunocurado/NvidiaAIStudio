@@ -208,6 +208,8 @@ final class NVIDIAAPIService: AIProvider {
         }
         
         // Parse SSE stream using .lines (handles UTF-8 multi-byte characters correctly)
+        var activeToolCalls: [Int: Message.ToolCall] = [:]
+        
         for try await line in bytes.lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             
@@ -237,15 +239,25 @@ final class NVIDIAAPIService: AIProvider {
                 reasoning = thinkingContent
             }
             
-            // Parse tool calls
-            var toolCalls: [Message.ToolCall]?
+            // Parse tool calls with stateful accumulation
+            var toolCallsUpdated = false
             if let tc = delta["tool_calls"] as? [[String: Any]] {
-                toolCalls = tc.compactMap { call in
-                    guard let id = call["id"] as? String,
-                          let function = call["function"] as? [String: Any],
-                          let name = function["name"] as? String else { return nil }
-                    let args = function["arguments"] as? String ?? ""
-                    return Message.ToolCall(id: id, name: name, arguments: args, status: .pending)
+                for call in tc {
+                    let index = call["index"] as? Int ?? 0
+                    if let id = call["id"] as? String,
+                       let function = call["function"] as? [String: Any],
+                       let name = function["name"] as? String {
+                        let args = function["arguments"] as? String ?? ""
+                        activeToolCalls[index] = Message.ToolCall(id: id, name: name, arguments: args, status: .pending)
+                        toolCallsUpdated = true
+                    } else if let function = call["function"] as? [String: Any],
+                              let argsDelta = function["arguments"] as? String {
+                        if var existing = activeToolCalls[index] {
+                            existing.arguments += argsDelta
+                            activeToolCalls[index] = existing
+                            toolCallsUpdated = true
+                        }
+                    }
                 }
             }
             
@@ -259,11 +271,13 @@ final class NVIDIAAPIService: AIProvider {
                 }
             }
 
-            if content != nil || reasoning != nil || toolCalls != nil || finishReason != nil || usage != nil {
+            let currentToolCalls = toolCallsUpdated ? activeToolCalls.sorted(by: { $0.key < $1.key }).map { $0.value } : nil
+
+            if content != nil || reasoning != nil || toolCallsUpdated || finishReason != nil || usage != nil {
                 continuation.yield(ChatChunk(
                     content: content,
                     reasoning: reasoning,
-                    toolCalls: toolCalls,
+                    toolCalls: currentToolCalls,
                     finishReason: finishReason,
                     usage: usage
                 ))

@@ -88,7 +88,7 @@ final class ChatViewModel {
                     if Task.isCancelled { break }
                     if let c = chunk.content { accContent += c; await MainActor.run { self.streamingStatus = "Writing" } }
                     if let r = chunk.reasoning { accReasoning = (accReasoning ?? "") + r; await MainActor.run { self.streamingStatus = "Thinking" } }
-                    if let tc = chunk.toolCalls { accToolCalls = (accToolCalls ?? []) + tc; await MainActor.run { self.streamingStatus = "Running tools" } }
+                    if let tc = chunk.toolCalls { accToolCalls = tc; await MainActor.run { self.streamingStatus = "Running tools" } }
                     if let u = chunk.usage { accUsage = u }
                     let snapContent = accContent
                     let snapReasoning = accReasoning

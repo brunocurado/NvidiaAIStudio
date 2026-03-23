@@ -57,7 +57,7 @@ struct Message: Identifiable, Codable, Equatable {
     struct ToolCall: Identifiable, Codable, Equatable {
         let id: String
         let name: String
-        let arguments: String
+        var arguments: String
         var result: String?
         var status: ToolCallStatus
         

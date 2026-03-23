@@ -151,6 +151,8 @@ final class OpenAIAPIService: AIProvider {
         }
 
         // Standard OpenAI SSE parsing (identical to NVIDIAAPIService)
+        var activeToolCalls: [Int: Message.ToolCall] = [:]
+        
         for try await line in bytes.lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard trimmed.hasPrefix("data: ") else { continue }
@@ -174,17 +176,24 @@ final class OpenAIAPIService: AIProvider {
             let reasoning: String? = delta["reasoning"] as? String
 
             // Tool calls
-            var toolCalls: [Message.ToolCall]?
+            var toolCallsUpdated = false
             if let tc = delta["tool_calls"] as? [[String: Any]] {
-                toolCalls = tc.compactMap { call in
-                    guard let id = call["id"] as? String,
-                          let fn = call["function"] as? [String: Any],
-                          let name = fn["name"] as? String else { return nil }
-                    return Message.ToolCall(
-                        id: id, name: name,
-                        arguments: fn["arguments"] as? String ?? "",
-                        status: .pending
-                    )
+                for call in tc {
+                    let index = call["index"] as? Int ?? 0
+                    if let id = call["id"] as? String,
+                       let fn = call["function"] as? [String: Any],
+                       let name = fn["name"] as? String {
+                        let args = fn["arguments"] as? String ?? ""
+                        activeToolCalls[index] = Message.ToolCall(id: id, name: name, arguments: args, status: .pending)
+                        toolCallsUpdated = true
+                    } else if let fn = call["function"] as? [String: Any],
+                              let argsDelta = fn["arguments"] as? String {
+                        if var existing = activeToolCalls[index] {
+                            existing.arguments += argsDelta
+                            activeToolCalls[index] = existing
+                            toolCallsUpdated = true
+                        }
+                    }
                 }
             }
 
@@ -196,9 +205,11 @@ final class OpenAIAPIService: AIProvider {
                 if p > 0 || c > 0 { usage = TokenUsage(promptTokens: p, completionTokens: c) }
             }
 
-            if content != nil || reasoning != nil || toolCalls != nil || finishReason != nil || usage != nil {
+            let currentToolCalls = toolCallsUpdated ? activeToolCalls.sorted(by: { $0.key < $1.key }).map { $0.value } : nil
+
+            if content != nil || reasoning != nil || toolCallsUpdated || finishReason != nil || usage != nil {
                 continuation.yield(ChatChunk(
-                    content: content, reasoning: reasoning, toolCalls: toolCalls,
+                    content: content, reasoning: reasoning, toolCalls: currentToolCalls,
                     finishReason: finishReason, usage: usage
                 ))
             }
