@@ -91,7 +91,7 @@ struct MessageBubbleView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                             .font(.system(size: 9))
-                        Text(message.timestamp.formatted(date: .omitted, time: .shortened))
+                        Text(message.timestamp.formatted(date: .abbreviated, time: .shortened))
                             .font(.system(size: 10))
                     }
                     .foregroundStyle(.secondary.opacity(0.7))
