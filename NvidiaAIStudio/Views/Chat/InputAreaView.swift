@@ -254,7 +254,6 @@ struct InputAreaView: View {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                     guard let url, url.isFileURL else { return }
                     guard let data = try? Data(contentsOf: url) else { return }
-                    let filename = url.lastPathComponent
                     let ext = url.pathExtension.lowercased()
                     var mimeType: String
                     switch ext {
@@ -330,7 +329,6 @@ struct InputAreaView: View {
         
         for url in panel.urls {
             guard let data = try? Data(contentsOf: url) else { continue }
-            let filename = url.lastPathComponent
             let ext = url.pathExtension.lowercased()
             
             var mimeType: String
