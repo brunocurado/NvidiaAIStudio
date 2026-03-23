@@ -35,11 +35,11 @@ struct ChatView: View {
                         }
                         .padding(.vertical, 16)
                     }
-                    .onChange(of: session.messages.count) {
-                        withAnimation(.easeOut(duration: 0.3)) {
-                            if let lastID = session.messages.last?.id {
-                                proxy.scrollTo(lastID)
-                            }
+                    .onChange(of: session.messages) {
+                        if viewModel.isStreaming {
+                            proxy.scrollTo("streaming-indicator", anchor: .bottom)
+                        } else if let lastID = session.messages.last?.id {
+                            proxy.scrollTo(lastID, anchor: .bottom)
                         }
                     }
                     .onChange(of: viewModel.isStreaming) {
