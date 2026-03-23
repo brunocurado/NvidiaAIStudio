@@ -105,25 +105,27 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         }
     }
 
-    func windowDidEnterFullScreen(_ notification: Notification) {
-        guard let w = notification.object as? NSWindow else { return }
-        // Delay necessário — macOS demora a terminar a animação de fullscreen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            Self.styleWindow(w)
-        }
-    }
-
     func windowWillEnterFullScreen(_ notification: Notification) {
         guard let w = notification.object as? NSWindow else { return }
         Self.styleWindow(w)
     }
 
-    func windowDidExitFullScreen(_ notification: Notification) {
+    func windowDidEnterFullScreen(_ notification: Notification) {
         guard let w = notification.object as? NSWindow else { return }
-        Self.styleWindow(w)
+        // Esconde menu bar e toolbar em fullscreen para Liquid Glass puro
+        NSApp.presentationOptions = [.autoHideMenuBar, .autoHideToolbar]
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            Self.styleWindow(w)
+        }
     }
 
     func windowWillExitFullScreen(_ notification: Notification) {
+        guard let w = notification.object as? NSWindow else { return }
+        NSApp.presentationOptions = []
+        Self.styleWindow(w)
+    }
+
+    func windowDidExitFullScreen(_ notification: Notification) {
         guard let w = notification.object as? NSWindow else { return }
         Self.styleWindow(w)
     }
