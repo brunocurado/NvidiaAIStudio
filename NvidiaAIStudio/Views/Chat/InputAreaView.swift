@@ -62,7 +62,10 @@ struct InputAreaView: View {
                     isFocused: _isFocused,
                     onHeightChange: { h in
                         editorHeight = min(h, 300)
-                    }
+                    },
+                    placeholder: viewModel.isStreaming
+                        ? "Interrupt with a message..."
+                        : "Message this thread..."
                 )
                 .frame(height: editorHeight)
                 
@@ -74,7 +77,7 @@ struct InputAreaView: View {
                         sendMessage()
                     }
                 } label: {
-                    Image(systemName: viewModel.isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
+                    Image(systemName: viewModel.isStreaming ? "stop.fill" : "arrow.up.circle.fill")
                         .font(.title2)
                         .foregroundStyle(inputText.isEmpty && !viewModel.isStreaming ? Color.secondary : Color.primary)
                 }
@@ -242,8 +245,19 @@ struct InputAreaView: View {
                 .fixedSize()
                 .onAppear { appState.refreshGitBranch() }
                 
+                // Streaming spinner
+                if viewModel.isStreaming {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.8)
+                }
+                
                 // Context usage ring
-                ContextIndicatorView(usage: viewModel.contextUsage)
+                ContextIndicatorView(
+                    usage: viewModel.contextUsage,
+                    estimatedTokenCount: viewModel.estimatedTokenCount,
+                    maxTokens: viewModel.maxTokens
+                )
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -307,6 +321,19 @@ struct InputAreaView: View {
     private func sendMessage() {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
+        
+        // If streaming, send as an interrupt instead of a new request
+        if viewModel.isStreaming {
+            viewModel.pendingUserInterrupt = text
+            inputText = ""
+            // Show the user's message immediately in the chat
+            appState.mutateActiveSession { session in
+                session.messages.append(Message(role: .user, content: text))
+                session.updatedAt = Date()
+            }
+            return
+        }
+        
         let attachments = pendingAttachments
         inputText = ""
         pendingAttachments = []
@@ -456,6 +483,7 @@ struct ChatTextEditor: NSViewRepresentable {
     let onSubmit: () -> Void
     @FocusState var isFocused: Bool
     var onHeightChange: ((CGFloat) -> Void)? = nil
+    var placeholder: String = "Message this thread..."
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -481,7 +509,7 @@ struct ChatTextEditor: NSViewRepresentable {
         textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         
         // Placeholder
-        textView.placeholderString = "Message this thread..."
+        textView.placeholderString = placeholder
         
         scrollView.documentView = textView
         
@@ -495,6 +523,10 @@ struct ChatTextEditor: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
         }
+        
+        // Update placeholder dynamically (e.g., streaming → interrupt mode)
+        textView.placeholderString = placeholder
+        textView.needsDisplay = true
         
         if isFocused {
             DispatchQueue.main.async {
@@ -578,23 +610,53 @@ class ChatNSTextView: NSTextView {
     }
 }
 
-/// Circular context usage indicator (green → yellow → red).
+/// Circular context usage indicator with popover showing token details.
 struct ContextIndicatorView: View {
     let usage: Double // 0.0 to 1.0
+    var estimatedTokenCount: Int = 0
+    var maxTokens: Int = 200_000
+    @State private var showPopover = false
     
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(.white.opacity(0.1), lineWidth: 2.5)
-            
-            Circle()
-                .trim(from: 0, to: usage)
-                .stroke(ringColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.3), value: usage)
+        Button {
+            showPopover.toggle()
+        } label: {
+            ZStack {
+                Circle()
+                    .stroke(.white.opacity(0.1), lineWidth: 2.5)
+                
+                Circle()
+                    .trim(from: 0, to: usage)
+                    .stroke(ringColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.3), value: usage)
+            }
+            .frame(width: 20, height: 20)
         }
-        .frame(width: 20, height: 20)
+        .buttonStyle(.plain)
         .help("Context: \(Int(usage * 100))%")
+        .popover(isPresented: $showPopover, arrowEdge: .top) {
+            VStack(spacing: 8) {
+                Text("Context window:")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("\(Int(usage * 100))% full")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                Text("\(formatTokens(estimatedTokenCount)) / \(formatTokens(maxTokens)) tokens used")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if usage > 0.7 {
+                    Divider().opacity(0.3)
+                    Text("Context will be automatically\ncompacted when full.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(16)
+            .frame(width: 260)
+        }
     }
     
     private var ringColor: Color {
@@ -603,5 +665,11 @@ struct ContextIndicatorView: View {
         case ..<0.8: return .yellow
         default: return .red
         }
+    }
+    
+    private func formatTokens(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.2fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.0fK", Double(n) / 1_000) }
+        return "\(n)"
     }
 }

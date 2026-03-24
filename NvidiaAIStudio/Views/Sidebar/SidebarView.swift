@@ -52,9 +52,8 @@ struct SidebarView: View {
                 SidebarActionButton(icon: "plus.message.fill", label: "New thread", accentColor: .green) {
                     // Create thread in the currently active session's project (or General)
                     let projectPath = appState.activeSession?.projectPath
-                    var session = appState.createSession()
-                    session.projectPath = projectPath
-                    appState.activeSession = session
+                    let _ = appState.createSession()
+                    appState.mutateActiveSession { $0.projectPath = projectPath }
                 }
                 WorkspaceSidebarButton(onOpenPicker: openWorkspacePicker)
                 SidebarActionButton(icon: "sparkles", label: "Skills", accentColor: .purple) {
@@ -101,9 +100,8 @@ struct SidebarView: View {
                             },
                             onRenameThread: { session in renamingSession = session; renameSessionText = session.title },
                             onNewThread: { projectPath in
-                                var session = appState.createSession()
-                                session.projectPath = projectPath
-                                appState.activeSession = session
+                                let _ = appState.createSession()
+                                appState.mutateActiveSession { $0.projectPath = projectPath }
                             },
                             onRemoveWorkspace: { projectName in
                                 // Remove all sessions in this workspace and the workspace itself
@@ -168,9 +166,8 @@ struct SidebarView: View {
         panel.message = "Choose a project folder to open as workspace"
         if panel.runModal() == .OK, let url = panel.url {
             appState.addWorkspace(path: url.path)
-            var session = appState.createSession(title: "New Thread")
-            session.projectPath = url.path
-            appState.activeSession = session
+            let _ = appState.createSession(title: "New Thread")
+            appState.mutateActiveSession { $0.projectPath = url.path }
             appState.showToast("Workspace: \(url.lastPathComponent)", level: .success)
         }
     }

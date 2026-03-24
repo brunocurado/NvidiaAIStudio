@@ -199,9 +199,8 @@ struct CloneRepoView: View {
                     isCloning = false
                     // Open the cloned repo as a new workspace session
                     appState.activeWorkspacePath = clonedPath
-                    var session = appState.createSession(title: repo.name)
-                    session.projectPath = clonedPath
-                    appState.activeSession = session
+                    let _ = appState.createSession(title: repo.name)
+                    appState.mutateActiveSession { $0.projectPath = clonedPath }
                     appState.showToast("Cloned \(repo.name) successfully", level: .success)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { dismiss() }
                 }

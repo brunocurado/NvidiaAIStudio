@@ -19,6 +19,14 @@ final class AppState {
         }
     }
     
+    /// Mutate the active session in-place without replacing the entire struct.
+    /// This avoids full SwiftUI re-renders on every streaming chunk.
+    @MainActor
+    func mutateActiveSession(_ transform: (inout Session) -> Void) {
+        guard let idx = sessions.firstIndex(where: { $0.id == activeSessionID }) else { return }
+        transform(&sessions[idx])
+    }
+    
     // MARK: - Models
     var availableModels: [AIModel] = {
         var seen = Set<String>()

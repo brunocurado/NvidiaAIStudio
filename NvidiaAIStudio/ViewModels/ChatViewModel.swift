@@ -5,6 +5,9 @@ final class ChatViewModel {
     var isStreaming = false
     var streamingStatus = "Thinking"
     var contextUsage: Double = 0.0
+    var estimatedTokenCount: Int = 0
+    var maxTokens: Int = 200_000
+    @MainActor var pendingUserInterrupt: String? = nil
     
     private var streamTask: Task<Void, Never>?
     private let skillRegistry = SkillRegistry.shared
@@ -15,14 +18,16 @@ final class ChatViewModel {
             let _ = appState.createSession(title: String(text.prefix(40)))
         }
         let userMessage = Message(role: .user, content: text, attachments: attachments)
-        appState.activeSession?.messages.append(userMessage)
-        appState.activeSession?.updatedAt = Date()
-        if appState.activeSession?.messages.count == 1 {
-            appState.activeSession?.title = String(text.prefix(50))
+        appState.mutateActiveSession { session in
+            session.messages.append(userMessage)
+            session.updatedAt = Date()
+            if session.messages.count == 1 {
+                session.title = String(text.prefix(50))
+            }
         }
         guard let apiKey = appState.activeAPIKey ?? EnvParser.loadNVIDIAKey() else {
             let errorMsg = Message(role: .assistant, content: "⚠️ No API key configured.\n\nGo to **Settings → API Keys** to add your NVIDIA NIM key, or place it in a `.env` file:\n```\nNVIDIA_NIM_API_KEY=nvapi-...\n```")
-            appState.activeSession?.messages.append(errorMsg)
+            appState.mutateActiveSession { $0.messages.append(errorMsg) }
             return
         }
         guard let model = appState.selectedModel else {
@@ -63,9 +68,22 @@ final class ChatViewModel {
         for _ in 0..<maxIterations {
             if Task.isCancelled { break }
             
+            // Check for user interrupt before starting next iteration
+            if let interrupt = await MainActor.run(body: { self.pendingUserInterrupt }) {
+                await MainActor.run {
+                    self.pendingUserInterrupt = nil
+                    appState.mutateActiveSession { session in
+                        session.messages.append(Message(role: .user, content: interrupt))
+                        session.updatedAt = Date()
+                    }
+                    self.streamingStatus = "Reading your message..."
+                }
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            
             let streamingID = UUID()
             await MainActor.run {
-                appState.activeSession?.messages.append(Message(id: streamingID, role: .assistant, content: "", isStreaming: true))
+                appState.mutateActiveSession { $0.messages.append(Message(id: streamingID, role: .assistant, content: "", isStreaming: true)) }
                 self.streamingStatus = model.supportsThinking ? "Thinking" : "Generating"
             }
             
@@ -139,7 +157,7 @@ final class ChatViewModel {
                                 attachments: imageAttachments,
                                 toolCallId: toolCall.id
                             )
-                            appState.activeSession?.messages.append(toolResultMessage)
+                            appState.mutateActiveSession { $0.messages.append(toolResultMessage) }
                         }
                     }
                     continue
@@ -227,36 +245,39 @@ final class ChatViewModel {
     
     @MainActor
     private func updateMessage(id: UUID, with message: Message, in appState: AppState) {
-        guard var session = appState.activeSession,
-              let idx = session.messages.firstIndex(where: { $0.id == id }) else { return }
-        session.messages[idx] = message
-        appState.activeSession = session
+        guard let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
+              let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == id })
+        else { return }
+        appState.sessions[si].messages[mi] = message
     }
     
     @MainActor
     private func updateToolCallStatus(messageID: UUID, toolCallID: String, status: Message.ToolCall.ToolCallStatus, in appState: AppState) {
-        guard var session = appState.activeSession,
-              let mi = session.messages.firstIndex(where: { $0.id == messageID }),
-              let ti = session.messages[mi].toolCalls?.firstIndex(where: { $0.id == toolCallID }) else { return }
-        session.messages[mi].toolCalls?[ti].status = status
-        appState.activeSession = session
+        guard let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
+              let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == messageID }),
+              let ti = appState.sessions[si].messages[mi].toolCalls?.firstIndex(where: { $0.id == toolCallID })
+        else { return }
+        appState.sessions[si].messages[mi].toolCalls?[ti].status = status
     }
     
     @MainActor
     private func updateToolCallResult(messageID: UUID, toolCallID: String, result: String, status: Message.ToolCall.ToolCallStatus, in appState: AppState) {
-        guard var session = appState.activeSession,
-              let mi = session.messages.firstIndex(where: { $0.id == messageID }),
-              let ti = session.messages[mi].toolCalls?.firstIndex(where: { $0.id == toolCallID }) else { return }
-        session.messages[mi].toolCalls?[ti].result = result
-        session.messages[mi].toolCalls?[ti].status = status
-        appState.activeSession = session
+        guard let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
+              let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == messageID }),
+              let ti = appState.sessions[si].messages[mi].toolCalls?.firstIndex(where: { $0.id == toolCallID })
+        else { return }
+        appState.sessions[si].messages[mi].toolCalls?[ti].result = result
+        appState.sessions[si].messages[mi].toolCalls?[ti].status = status
     }
     
     @MainActor
     private func updateContextUsage(_ appState: AppState) {
         guard let session = appState.activeSession, let model = appState.selectedModel else { return }
         let totalChars = session.messages.reduce(0) { $0 + $1.content.count + ($1.reasoning?.count ?? 0) }
-        contextUsage = min(1.0, Double(totalChars / 4) / Double(model.contextWindow))
+        let tokens = totalChars / 4
+        estimatedTokenCount = tokens
+        maxTokens = model.contextWindow
+        contextUsage = min(1.0, Double(tokens) / Double(model.contextWindow))
         if contextUsage >= 0.80 { Task { await self.compressContext(appState: appState) } }
     }
     
@@ -296,7 +317,7 @@ final class ChatViewModel {
             return
         }
         guard !summary.isEmpty else { return }
-        appState.activeSession?.messages = [Message(role: .system, content: "📋 **[Conversation summary — earlier context compressed]**\n\n\(summary)")] + toKeep
+        appState.mutateActiveSession { $0.messages = [Message(role: .system, content: "📋 **[Conversation summary — earlier context compressed]**\n\n\(summary)")] + toKeep }
         appState.saveActiveSession()
         updateContextUsage(appState)
         appState.showToast("Context compressed to free up space", level: .info)

@@ -59,6 +59,12 @@ struct MessageBubbleView: View {
                     ForEach(toolCalls) { toolCall in
                         ToolCallPillView(toolCall: toolCall)
                     }
+                    
+                    // Show elapsed time badge after tool execution
+                    if message.role == .assistant && !message.isStreaming && !toolCalls.isEmpty {
+                        WorkedForBadge(timestamp: message.timestamp)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
                 }
                 
                 // Attachments — inline images
