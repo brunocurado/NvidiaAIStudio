@@ -54,6 +54,28 @@ struct MessageBubbleView: View {
                     .foregroundStyle(message.role == .user ? Color.white : Color.primary)
                 }
                 
+                // Status badges (Explored 1 file >, Running command...)
+                if !message.statusBadges.isEmpty {
+                    VStack(spacing: 4) {
+                        ForEach(message.statusBadges) { badge in
+                            HStack(spacing: 6) {
+                                if let icon = badge.icon {
+                                    Image(systemName: icon)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.blue.opacity(0.7))
+                                }
+                                Text(badge.text)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 7, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                    }
+                }
+
                 // Tool calls — GlassCode-style inline diff pills
                 if let toolCalls = message.toolCalls {
                     ForEach(toolCalls) { toolCall in

@@ -167,6 +167,7 @@ extension Notification.Name {
     static let openWorkspacePicker = Notification.Name("openWorkspacePicker")
     static let openGitPanel = Notification.Name("openGitPanel")
     static let responseCompleted = Notification.Name("responseCompleted")
+    static let diffShouldRefresh = Notification.Name("diffShouldRefresh")
 }
 
 // MARK: - Notifications helper

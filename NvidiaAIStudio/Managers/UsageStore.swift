@@ -101,4 +101,113 @@ final class UsageStore {
             .prefix(limit)
             .map { ($0.name, $0.tokens) }
     }
+
+    // MARK: - Heatmap & Streaks
+
+    /// Returns a 2D array for heatmap: [weekday 0-6][week 0-52] = token count
+    func tokensByWeekdayAndWeek() -> [[Int]] {
+        let calendar = Calendar.current
+        let now = Date()
+        var grid = Array(repeating: Array(repeating: 0, count: 53), count: 7)
+        let records = load()
+
+        for record in records {
+            let weeksAgo = calendar.dateComponents([.weekOfYear], from: record.date, to: now).weekOfYear ?? 53
+            guard weeksAgo < 53 && weeksAgo >= 0 else { continue }
+            let weekday = (calendar.component(.weekday, from: record.date) + 5) % 7  // Mon=0, Sun=6
+            let weekCol = 52 - weeksAgo
+            grid[weekday][weekCol] += record.totalTokens
+        }
+        return grid
+    }
+
+    /// Total input tokens
+    func totalInputTokens() -> Int {
+        load().reduce(0) { $0 + $1.promptTokens }
+    }
+
+    /// Total output tokens
+    func totalOutputTokens() -> Int {
+        load().reduce(0) { $0 + $1.completionTokens }
+    }
+
+    /// Longest streak (consecutive days with usage)
+    func longestStreak() -> Int {
+        let records = load()
+        let calendar = Calendar.current
+        let uniqueDays = Set(records.map { calendar.startOfDay(for: $0.date) }).sorted()
+        guard !uniqueDays.isEmpty else { return 0 }
+
+        var longest = 1, current = 1
+        for i in 1..<uniqueDays.count {
+            if let next = calendar.date(byAdding: .day, value: 1, to: uniqueDays[i-1]),
+               calendar.isDate(uniqueDays[i], inSameDayAs: next) {
+                current += 1
+                longest = max(longest, current)
+            } else {
+                current = 1
+            }
+        }
+        return longest
+    }
+
+    /// Current streak (consecutive days ending today or yesterday)
+    func currentStreak() -> Int {
+        let records = load()
+        let calendar = Calendar.current
+        let uniqueDays = Set(records.map { calendar.startOfDay(for: $0.date) }).sorted().reversed()
+        guard let first = uniqueDays.first,
+              calendar.isDateInToday(first) || calendar.isDateInYesterday(first) else { return 0 }
+
+        var streak = 1
+        var prev = first
+        for day in uniqueDays.dropFirst() {
+            if let expected = calendar.date(byAdding: .day, value: -1, to: prev),
+               calendar.isDate(day, inSameDayAs: expected) {
+                streak += 1
+                prev = day
+            } else {
+                break
+            }
+        }
+        return streak
+    }
+
+    /// Unique sessions in last 30 days
+    func sessionsInLast30Days() -> Int {
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -30, to: Date()) else { return 0 }
+        return Set(load().filter { $0.date >= cutoff }.map { $0.sessionTitle }).count
+    }
+
+    /// Message count in last 7 days
+    func messagesInLast7Days() -> Int {
+        guard let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) else { return 0 }
+        return load().filter { $0.date >= cutoff }.count
+    }
+
+    /// Week usage as percentage
+    func weekUsagePercent() -> Int {
+        let calendar = Calendar.current
+        let startOfWeek = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())
+        guard let weekStart = calendar.date(from: startOfWeek) else { return 0 }
+        let thisWeek = load().filter { $0.date >= weekStart }.reduce(0) { $0 + $1.totalTokens }
+        let allTime = totalTokens()
+        guard allTime > 0 else { return 0 }
+        let firstDate = load().first?.date ?? Date()
+        let weeks = max(1, calendar.dateComponents([.weekOfYear], from: firstDate, to: Date()).weekOfYear ?? 1)
+        let avgWeekly = max(1, allTime / weeks)
+        return min(100, thisWeek * 100 / avgWeekly)
+    }
+
+    /// Number of unique projects (workspace paths)
+    func projectCount() -> Int {
+        // Derive from session titles — unique first-word groupings
+        Set(load().map { $0.provider }).count
+    }
+
+    /// Sessions active today
+    func sessionsActiveToday() -> Int {
+        let today = Calendar.current.startOfDay(for: Date())
+        return Set(load().filter { $0.date >= today }.map { $0.sessionTitle }).count
+    }
 }

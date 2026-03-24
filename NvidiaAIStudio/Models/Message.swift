@@ -10,6 +10,7 @@ struct Message: Identifiable, Codable, Equatable {
     var toolCalls: [ToolCall]?
     var toolCallId: String?
     var isStreaming: Bool
+    var statusBadges: [StatusBadge]
     
     init(
         id: UUID = UUID(),
@@ -20,7 +21,8 @@ struct Message: Identifiable, Codable, Equatable {
         reasoning: String? = nil,
         toolCalls: [ToolCall]? = nil,
         toolCallId: String? = nil,
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        statusBadges: [StatusBadge] = []
     ) {
         self.id = id
         self.role = role
@@ -31,8 +33,40 @@ struct Message: Identifiable, Codable, Equatable {
         self.toolCalls = toolCalls
         self.toolCallId = toolCallId
         self.isStreaming = isStreaming
+        self.statusBadges = statusBadges
     }
     
+    struct StatusBadge: Codable, Equatable, Identifiable {
+        let id: UUID
+        let text: String
+        let icon: String?
+        
+        init(id: UUID = UUID(), text: String, icon: String? = nil) {
+            self.id = id
+            self.text = text
+            self.icon = icon
+        }
+    }
+    
+    // Backwards-compatible decoding: old sessions won't have statusBadges
+    enum CodingKeys: String, CodingKey {
+        case id, role, content, attachments, timestamp, reasoning, toolCalls, toolCallId, isStreaming, statusBadges
+    }
+    
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        role = try c.decode(Role.self, forKey: .role)
+        content = try c.decode(String.self, forKey: .content)
+        attachments = try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        timestamp = try c.decode(Date.self, forKey: .timestamp)
+        reasoning = try c.decodeIfPresent(String.self, forKey: .reasoning)
+        toolCalls = try c.decodeIfPresent([ToolCall].self, forKey: .toolCalls)
+        toolCallId = try c.decodeIfPresent(String.self, forKey: .toolCallId)
+        isStreaming = try c.decodeIfPresent(Bool.self, forKey: .isStreaming) ?? false
+        statusBadges = try c.decodeIfPresent([StatusBadge].self, forKey: .statusBadges) ?? []
+    }
+
     enum Role: String, Codable {
         case system
         case user

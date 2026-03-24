@@ -1,50 +1,124 @@
 import SwiftUI
 
+/// GlassCode-style Skills panel with 2-column grid layout.
 struct SkillsPanelView: View {
     @State private var skillStates: [String: Bool] = SkillsPanelView.loadSkillStates()
+    @State private var searchText = ""
     @Environment(\.dismiss) private var dismiss
     private let registry = SkillRegistry.shared
-    
+
+    private var filteredSkills: [any Skill] {
+        let all = Array(registry.allSkills).sorted(by: { $0.name < $1.name })
+        if searchText.isEmpty { return all }
+        return all.filter { $0.name.localizedCaseInsensitiveContains(searchText) || $0.description.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    private var installedSkills: [any Skill] {
+        filteredSkills.filter { skillStates[$0.name] ?? true }
+    }
+
+    private var recommendedSkills: [any Skill] {
+        filteredSkills.filter { !(skillStates[$0.name] ?? true) }
+    }
+
+    private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
     var body: some View {
         VStack(spacing: 0) {
+            // Header
             HStack {
-                Text("Skills").font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Skills").font(.headline)
+                    Text("Give NvidiaAIStudio superpowers.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Done") { dismiss() }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
             }
             .padding()
-            Divider()
-            Text("Enable or disable skills. Disabled skills won't be available to the AI.")
-                .font(.caption).foregroundStyle(.secondary).padding(.horizontal).padding(.top, 8)
+
+            // Search
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.caption)
+                TextField("Search", text: $searchText).textFieldStyle(.plain).font(.caption)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal)
+
+            Divider().padding(.vertical, 8)
+
             ScrollView {
-                LazyVStack(spacing: 1) {
-                    ForEach(Array(registry.allSkills).sorted(by: { $0.name < $1.name }), id: \.name) { skill in
-                        SkillRowView(
-                            skill: skill,
-                            isEnabled: Binding(
-                                get: { skillStates[skill.name] ?? true },
-                                set: { newVal in
-                                    skillStates[skill.name] = newVal
-                                    SkillsPanelView.saveSkillStates(skillStates)
-                                    if newVal { registry.enable(skill.name) } else { registry.disable(skill.name) }
-                                }
-                            )
-                        )
+                VStack(alignment: .leading, spacing: 16) {
+                    // Installed section
+                    if !installedSkills.isEmpty {
+                        Text("Installed")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(installedSkills, id: \.name) { skill in
+                                SkillCardView(
+                                    skill: skill,
+                                    isEnabled: Binding(
+                                        get: { skillStates[skill.name] ?? true },
+                                        set: { newVal in
+                                            skillStates[skill.name] = newVal
+                                            SkillsPanelView.saveSkillStates(skillStates)
+                                            if newVal { registry.enable(skill.name) } else { registry.disable(skill.name) }
+                                        }
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    // Recommended section
+                    if !recommendedSkills.isEmpty {
+                        Divider().opacity(0.3)
+
+                        Text("Recommended")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(recommendedSkills, id: \.name) { skill in
+                                SkillCardView(
+                                    skill: skill,
+                                    isEnabled: Binding(
+                                        get: { skillStates[skill.name] ?? true },
+                                        set: { newVal in
+                                            skillStates[skill.name] = newVal
+                                            SkillsPanelView.saveSkillStates(skillStates)
+                                            if newVal { registry.enable(skill.name) } else { registry.disable(skill.name) }
+                                        }
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
                 .padding()
             }
+
             Divider()
             HStack(spacing: 6) {
                 Image(systemName: "puzzlepiece.extension.fill").font(.caption).foregroundStyle(.secondary)
-                Text("For JavaScript-rendered pages (SPAs), add **MCP Puppeteer** in Settings → MCP.")
+                Text("Skills extend the AI's capabilities with tools and integrations.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(.horizontal).padding(.vertical, 10)
         }
-        .frame(width: 400, height: 520)
+        .frame(width: 520, height: 580)
     }
-    
+
     static func loadSkillStates() -> [String: Bool] {
         UserDefaults.standard.dictionary(forKey: "skillStates") as? [String: Bool] ?? [:]
     }
@@ -53,27 +127,47 @@ struct SkillsPanelView: View {
     }
 }
 
-struct SkillRowView: View {
+// MARK: - Skill Card
+
+struct SkillCardView: View {
     let skill: any Skill
     @Binding var isEnabled: Bool
-    
+
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: iconForSkill(skill.name))
-                .font(.title3)
-                .foregroundStyle(isEnabled ? colorForSkill(skill.name) : .gray)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(skill.name).font(.body).fontWeight(.medium)
-                Text(skill.description).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(colorForSkill(skill.name).opacity(0.15))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: iconForSkill(skill.name))
+                        .font(.title3)
+                        .foregroundStyle(isEnabled ? colorForSkill(skill.name) : .gray)
+                }
+                Spacer()
+                Toggle("", isOn: $isEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
             }
-            Spacer()
-            Toggle("", isOn: $isEnabled).labelsHidden().toggleStyle(.switch).controlSize(.small)
+
+            Text(displayName(skill.name))
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            Text(skill.description)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
         }
-        .padding(.vertical, 6).padding(.horizontal, 4)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(isEnabled ? 0.03 : 0)))
+        .padding(12)
+        .glassEffect(isEnabled ? .regular : .regular.tint(.white.opacity(0.02)), in: RoundedRectangle(cornerRadius: 12))
     }
-    
+
+    private func displayName(_ name: String) -> String {
+        name.split(separator: "_").map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
     private func iconForSkill(_ name: String) -> String {
         switch name {
         case "read_file":       return "doc.text.fill"
@@ -90,7 +184,7 @@ struct SkillRowView: View {
         default:                return "puzzlepiece.fill"
         }
     }
-    
+
     private func colorForSkill(_ name: String) -> Color {
         switch name {
         case "read_file":       return .blue

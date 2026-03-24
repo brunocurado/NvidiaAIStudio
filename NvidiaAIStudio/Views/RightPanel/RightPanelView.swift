@@ -52,13 +52,11 @@ struct RightPanelView: View {
 
 struct DiffViewerContent: View {
     @State private var changedFiles: [DiffFile] = []
-    @State private var selectedFile: DiffFile?
     @State private var isLoading = false
-    
+
     var body: some View {
         VStack(spacing: 0) {
             if changedFiles.isEmpty && !isLoading {
-                // Empty state
                 Spacer()
                 VStack(spacing: 12) {
                     Image(systemName: "checkmark.circle.fill")
@@ -78,135 +76,126 @@ struct DiffViewerContent: View {
                     .font(.caption)
                 Spacer()
             } else {
-                // File list
+                // Collapsible file sections
                 ScrollView {
-                    VStack(spacing: 2) {
+                    LazyVStack(spacing: 0) {
                         ForEach(changedFiles) { file in
-                            DiffFileRow(file: file, isSelected: selectedFile?.id == file.id)
-                                .onTapGesture {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        selectedFile = file
-                                    }
-                                }
+                            DiffFileSection(file: file)
                         }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.top, 8)
                 }
-                
-                // Selected file diff content
-                if let file = selectedFile {
-                    Divider().opacity(0.3)
-                    
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(file.lines.enumerated()), id: \.offset) { _, line in
-                                DiffLineView(line: line)
-                            }
-                        }
-                        .padding(8)
-                    }
-                    .frame(maxHeight: .infinity)
-                }
-                
+
                 Divider().opacity(0.3)
-                
-                // Action buttons
-                HStack(spacing: 12) {
+
+                // Action buttons — GlassCode style
+                HStack(spacing: 16) {
+                    Spacer()
                     Button {
                         // Revert all
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.caption2)
+                            Image(systemName: "arrow.uturn.backward.circle")
+                                .font(.caption)
                             Text("Revert all")
                                 .font(.caption)
                         }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    
+
                     Button {
                         // Stage all
                     } label: {
                         HStack(spacing: 4) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.caption2)
+                            Image(systemName: "plus")
+                                .font(.caption)
                             Text("Stage all")
                                 .font(.caption)
                         }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.blue)
-                    
-                    Spacer()
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
             }
         }
         .onAppear { loadDiff() }
+        .onReceive(NotificationCenter.default.publisher(for: .diffShouldRefresh)) { _ in
+            loadDiff()
+        }
     }
-    
+
     private func loadDiff() {
         isLoading = true
         Task {
             let files = await GitHelper.getChangedFiles()
             await MainActor.run {
                 changedFiles = files
-                selectedFile = files.first
                 isLoading = false
             }
         }
     }
 }
 
-struct DiffFileRow: View {
+/// Collapsible diff section per file — GlassCode style
+struct DiffFileSection: View {
     let file: DiffFile
-    let isSelected: Bool
-    
+    @State private var isExpanded = false
+    @State private var isHovered = false
+
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: file.statusIcon)
-                .font(.caption2)
-                .foregroundStyle(file.statusColor)
-                .frame(width: 14)
-            
-            Text(file.filename)
-                .font(.system(size: 12, design: .monospaced))
-                .lineLimit(1)
-            
-            Spacer()
-            
-            // +/- badges
-            if file.additions > 0 {
-                Text("+\(file.additions)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.green)
-            }
-            if file.deletions > 0 {
-                Text("-\(file.deletions)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.red)
-            }
-            
-            // Delete (discard) button
-            Button {
-                // Discard changes for this file
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            Button { withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() } } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 12)
+
+                    Text(file.filename)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+
+                    Spacer()
+
+                    if file.additions > 0 {
+                        Text("+\(file.additions)")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.green)
+                    }
+                    if file.deletions > 0 {
+                        Text("-\(file.deletions)")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.red)
+                    }
+
+                    Button { /* discard */ } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(isHovered ? 1 : 0)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
             .buttonStyle(.plain)
-            .opacity(isSelected ? 1 : 0)
+            .onHover { isHovered = $0 }
+
+            if isExpanded && !file.lines.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(file.lines.enumerated()), id: \.offset) { _, line in
+                        DiffLineView(line: line)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+
+            Divider().opacity(0.2)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? .white.opacity(0.1) : .clear)
-        )
     }
 }
 

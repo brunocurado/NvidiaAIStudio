@@ -127,7 +127,16 @@ final class ChatViewModel {
                     await MainActor.run { self.streamingStatus = "Executing tools (\(toolCalls.count))" }
                     
                     for toolCall in toolCalls {
+                        // Add status badge before execution
                         await MainActor.run {
+                            let badgeText = self.badgeTextForTool(toolCall)
+                            let badgeIcon = self.iconForTool(toolCall.name)
+                            if let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
+                               let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == streamingID }) {
+                                appState.sessions[si].messages[mi].statusBadges.append(
+                                    Message.StatusBadge(text: badgeText, icon: badgeIcon)
+                                )
+                            }
                             self.updateToolCallStatus(messageID: streamingID, toolCallID: toolCall.id, status: .running, in: appState)
                         }
                         let accessLevel = await MainActor.run { appState.fileAccessLevel }
@@ -139,6 +148,10 @@ final class ChatViewModel {
                             rawResult = try await skillRegistry.execute(name: toolCall.name, arguments: toolCall.arguments, accessLevel: accessLevel, workspacePath: workspacePath)
                             await MainActor.run {
                                 self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .completed, in: appState)
+                                // Auto-refresh diff panel when file tools complete
+                                if ["write_file", "edit_file", "replace_file"].contains(toolCall.name) {
+                                    NotificationCenter.default.post(name: .diffShouldRefresh, object: nil)
+                                }
                             }
                         } catch {
                             rawResult = "Error: \(error.localizedDescription)"
@@ -321,5 +334,64 @@ final class ChatViewModel {
         appState.saveActiveSession()
         updateContextUsage(appState)
         appState.showToast("Context compressed to free up space", level: .info)
+    }
+    
+    // MARK: - Status Badge Helpers
+    
+    private func badgeTextForTool(_ toolCall: Message.ToolCall) -> String {
+        let filename = extractFilename(from: toolCall.arguments)
+        switch toolCall.name {
+        case "read_file":
+            return "Explored \(filename ?? "file")"
+        case "list_directory":
+            return "Exploring directory..."
+        case "run_command":
+            let cmd = extractCommand(from: toolCall.arguments) ?? "command"
+            return "Running: \(String(cmd.prefix(40)))"
+        case "write_file", "edit_file", "replace_file":
+            return "Editing \(filename ?? "file")..."
+        case "search_files":
+            return "Searching files..."
+        case "web_search":
+            return "Searching the web..."
+        case "generate_image":
+            return "Generating image..."
+        case "git":
+            return "Running git..."
+        case "fetch_url":
+            return "Fetching URL..."
+        default:
+            return "Running \(toolCall.name)..."
+        }
+    }
+    
+    private func iconForTool(_ name: String) -> String {
+        switch name {
+        case "read_file":       return "doc.text.magnifyingglass"
+        case "write_file", "edit_file", "replace_file": return "square.and.pencil"
+        case "list_directory":  return "folder.fill"
+        case "search_files":    return "magnifyingglass"
+        case "run_command":     return "terminal.fill"
+        case "generate_image":  return "photo.fill"
+        case "git":             return "arrow.triangle.branch"
+        case "fetch_url":       return "globe"
+        case "web_search":      return "magnifyingglass.circle.fill"
+        default:                return "puzzlepiece.fill"
+        }
+    }
+    
+    private func extractFilename(from arguments: String) -> String? {
+        guard let data = arguments.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let path = json["path"] as? String ?? json["file_path"] as? String ?? json["filename"] as? String
+        else { return nil }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+    
+    private func extractCommand(from arguments: String) -> String? {
+        guard let data = arguments.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return json["command"] as? String
     }
 }
