@@ -31,7 +31,7 @@ struct SidebarView: View {
             // Header — matches GlassCode "Threads" title
             HStack {
                 Text("Threads")
-                    .font(.caption)
+                    .font(.footnote)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -39,7 +39,7 @@ struct SidebarView: View {
                     exportActiveThread()
                 } label: {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -67,8 +67,8 @@ struct SidebarView: View {
             .padding(.top, 8)
             
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.caption)
-                TextField("Search threads...", text: $searchText).textFieldStyle(.plain).font(.caption)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.footnote)
+                TextField("Search threads...", text: $searchText).textFieldStyle(.plain).font(.footnote)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
@@ -126,10 +126,10 @@ struct SidebarView: View {
                     Text("Settings")
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(.system(size: 9, weight: .semibold))
                 }
-                .font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 16).padding(.vertical, 10)
+                .font(.footnote).foregroundStyle(.secondary)
+                .padding(.horizontal, 16).padding(.vertical, 11)
             }
             .buttonStyle(.plain)
         }
@@ -218,23 +218,23 @@ struct ProjectFolderView: View {
             Button(action: onToggle) {
                 HStack(spacing: 6) {
                     Image(systemName: isExpanded ? "folder.fill" : "folder")
-                        .font(.caption)
+                        .font(.footnote)
                         .foregroundColor(projectName == "General" ? Color.secondary : Color.blue)
                     if isRenamingFolder {
                         TextField("", text: $folderRenameText)
-                            .font(.caption).fontWeight(.semibold).textFieldStyle(.plain)
+                            .font(.footnote).fontWeight(.semibold).textFieldStyle(.plain)
                             .onSubmit { if !folderRenameText.isEmpty { onRenameFolder?(projectName, folderRenameText) }; isRenamingFolder = false }
                             .onExitCommand { isRenamingFolder = false }
                     } else {
-                        Text(projectName).font(.caption).fontWeight(.semibold).lineLimit(1)
+                        Text(projectName).font(.footnote).fontWeight(.semibold).lineLimit(1)
                     }
                     Text("\(sessions.count)")
-                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.white.opacity(0.08), in: Capsule())
                     Spacer()
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .bold)).foregroundStyle(.secondary)
+                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 6).padding(.vertical, 6)
             }
@@ -305,14 +305,21 @@ struct SidebarActionButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(accentColor)
                     .frame(width: 16)
-                Text(label).font(.caption)
+                Text(label).font(.footnote)
                 Spacer()
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(
+                isHovered
+                    ? RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07))
+                    : nil
+            )
             .glassEffect(isHovered ? .regular : .identity, in: RoundedRectangle(cornerRadius: 8))
+            .scaleEffect(isHovered ? 1.01 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -330,17 +337,24 @@ struct WorkspaceSidebarButton: View {
         Button(action: showMenu) {
             HStack(spacing: 8) {
                 Image(systemName: "folder.badge.plus")
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(Color.orange)
                     .frame(width: 16)
-                Text("Open Workspace").font(.caption)
+                Text("Open Workspace").font(.footnote)
                 Spacer()
                 if !appState.savedWorkspaces.isEmpty {
-                    Image(systemName: "chevron.right").font(.system(size: 8)).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(
+                isHovered
+                    ? RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07))
+                    : nil
+            )
             .glassEffect(isHovered ? .regular : .identity, in: RoundedRectangle(cornerRadius: 8))
+            .scaleEffect(isHovered ? 1.01 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: isHovered)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -435,29 +449,41 @@ struct ThreadItemView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(session.title)
-                    .font(.caption)
+                    .font(.footnote)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .lineLimit(1)
                 if !session.backgroundAgents.isEmpty {
                     Text("\(session.backgroundAgents.count)")
-                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.blue.opacity(0.6), in: Capsule())
                 }
                 Spacer()
-                Text(session.relativeTime).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(session.relativeTime).font(.system(size: 11)).foregroundStyle(.secondary)
             }
             ForEach(session.backgroundAgents) { agent in
                 HStack(spacing: 6) {
                     Circle().fill(agentStatusColor(agent.status)).frame(width: 6, height: 6)
-                    Text(agent.name).font(.system(size: 10, weight: .medium)).foregroundStyle(.blue)
-                    Text(agent.task).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(agent.name).font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
+                    Text(agent.task).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .padding(.leading, 4)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .glassEffect(isSelected ? .regular.tint(.blue.opacity(0.15)) : (isHovered ? .regular : .identity), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 10).padding(.vertical, 9)
+        .background(
+            isSelected
+                ? RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.12))
+                : (isHovered ? RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.05)) : nil)
+        )
+        .glassEffect(
+            isSelected
+                ? .regular.tint(.blue.opacity(0.18))
+                : (isHovered ? .regular : .identity),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+        .scaleEffect(isSelected ? 1.005 : 1.0)
+        .animation(.easeOut(duration: 0.15), value: isSelected)
     }
     
     private func agentStatusColor(_ status: BackgroundAgent.AgentStatus) -> Color {
