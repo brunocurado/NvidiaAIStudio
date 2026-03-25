@@ -25,12 +25,14 @@ struct MessageBubbleView: View {
             }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                // Reasoning/thinking (collapsible)
+                // Reasoning/thinking (collapsible) — show during streaming even while content is empty
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
-                    ReasoningView(content: reasoning)
+                    ReasoningView(content: reasoning, isLive: message.isStreaming)
                 }
                 
                 // Content with Markdown rendering
+                // During streaming with thinking models, content may be empty while reasoning fills;
+                // show a placeholder to prevent the bubble from collapsing
                 if !message.content.isEmpty {
                     Group {
                         if message.role == .assistant {
@@ -433,23 +435,32 @@ struct StreamingDotsView: View {
 
 struct ReasoningView: View {
     let content: String
+    var isLive: Bool = false
     @State private var isExpanded = false
+    @State private var wasAutoExpanded = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 withAnimation(.spring(duration: 0.25)) {
                     isExpanded.toggle()
+                    wasAutoExpanded = false // user took manual control
                 }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "brain.head.profile.fill")
                         .font(.caption2)
-                    Text("Thinking")
+                    Text(isLive ? "Thinking..." : "Thinking")
                         .font(.caption2)
                         .fontWeight(.medium)
                     
-                    if !isExpanded {
+                    if isLive {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .scaleEffect(0.6)
+                    }
+                    
+                    if !isExpanded && !isLive {
                         Text("(\(content.count) characters)")
                             .font(.system(size: 10))
                             .foregroundStyle(.tertiary)
@@ -462,15 +473,32 @@ struct ReasoningView: View {
             }
             .buttonStyle(.plain)
             
-            if isExpanded {
-                Text(content)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(10)
-                    .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                    .textSelection(.enabled)
+            if isExpanded || isLive {
+                ScrollView {
+                    Text(content)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: isLive ? 120 : 300)
+                .padding(10)
+                .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .padding(.horizontal, 14)
+        .onChange(of: isLive) {
+            // Auto-collapse when streaming finishes (if user didn't manually expand)
+            if !isLive && wasAutoExpanded {
+                withAnimation(.spring(duration: 0.25)) {
+                    isExpanded = false
+                }
+            }
+        }
+        .onAppear {
+            if isLive {
+                wasAutoExpanded = true
+            }
+        }
     }
 }

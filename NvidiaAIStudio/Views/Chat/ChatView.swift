@@ -35,13 +35,14 @@ struct ChatView: View {
                         }
                         .padding(.vertical, 16)
                     }
-                    .onChange(of: session.messages) {
-                        if viewModel.isStreaming {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    .onChange(of: session.messages.count) {
+                        // Only scroll when new messages are added, not on every content update
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            if viewModel.isStreaming {
                                 proxy.scrollTo("streaming-indicator", anchor: .bottom)
+                            } else if let lastID = session.messages.last?.id {
+                                proxy.scrollTo(lastID, anchor: .bottom)
                             }
-                        } else if let lastID = session.messages.last?.id {
-                            proxy.scrollTo(lastID, anchor: .bottom)
                         }
                     }
                     .onChange(of: viewModel.isStreaming) {
