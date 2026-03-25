@@ -31,7 +31,7 @@ struct SidebarView: View {
             // Header — matches GlassCode "Threads" title
             HStack {
                 Text("Threads")
-                    .font(.footnote)
+                    .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -39,7 +39,7 @@ struct SidebarView: View {
                     exportActiveThread()
                 } label: {
                     Image(systemName: "square.and.arrow.up")
-                        .font(.footnote)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -67,8 +67,8 @@ struct SidebarView: View {
             .padding(.top, 8)
             
             HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.footnote)
-                TextField("Search threads...", text: $searchText).textFieldStyle(.plain).font(.footnote)
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.subheadline)
+                TextField("Search threads...", text: $searchText).textFieldStyle(.plain).font(.subheadline)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
@@ -128,8 +128,8 @@ struct SidebarView: View {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 9, weight: .semibold))
                 }
-                .font(.footnote).foregroundStyle(.secondary)
-                .padding(.horizontal, 16).padding(.vertical, 11)
+                .font(.subheadline).foregroundStyle(.secondary)
+                .padding(.horizontal, 16).padding(.vertical, 12)
             }
             .buttonStyle(.plain)
         }
@@ -218,23 +218,23 @@ struct ProjectFolderView: View {
             Button(action: onToggle) {
                 HStack(spacing: 6) {
                     Image(systemName: isExpanded ? "folder.fill" : "folder")
-                        .font(.footnote)
+                        .font(.subheadline)
                         .foregroundColor(projectName == "General" ? Color.secondary : Color.blue)
                     if isRenamingFolder {
                         TextField("", text: $folderRenameText)
-                            .font(.footnote).fontWeight(.semibold).textFieldStyle(.plain)
+                            .font(.subheadline).fontWeight(.semibold).textFieldStyle(.plain)
                             .onSubmit { if !folderRenameText.isEmpty { onRenameFolder?(projectName, folderRenameText) }; isRenamingFolder = false }
                             .onExitCommand { isRenamingFolder = false }
                     } else {
-                        Text(projectName).font(.footnote).fontWeight(.semibold).lineLimit(1)
+                        Text(projectName).font(.subheadline).fontWeight(.semibold).lineLimit(1)
                     }
                     Text("\(sessions.count)")
-                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.white.opacity(0.08), in: Capsule())
                     Spacer()
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
+                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 6).padding(.vertical, 6)
             }
@@ -305,10 +305,10 @@ struct SidebarActionButton: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.footnote)
+                    .font(.subheadline)
                     .foregroundStyle(accentColor)
                     .frame(width: 16)
-                Text(label).font(.footnote)
+                Text(label).font(.subheadline)
                 Spacer()
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
@@ -337,13 +337,13 @@ struct WorkspaceSidebarButton: View {
         Button(action: showMenu) {
             HStack(spacing: 8) {
                 Image(systemName: "folder.badge.plus")
-                    .font(.footnote)
+                    .font(.subheadline)
                     .foregroundStyle(Color.orange)
                     .frame(width: 16)
-                Text("Open Workspace").font(.footnote)
+                Text("Open Workspace").font(.subheadline)
                 Spacer()
                 if !appState.savedWorkspaces.isEmpty {
-                    Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
@@ -449,23 +449,23 @@ struct ThreadItemView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(session.title)
-                    .font(.footnote)
+                    .font(.subheadline)
                     .fontWeight(isSelected ? .semibold : .regular)
                     .lineLimit(1)
                 if !session.backgroundAgents.isEmpty {
                     Text("\(session.backgroundAgents.count)")
-                        .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(.blue.opacity(0.6), in: Capsule())
                 }
                 Spacer()
-                Text(session.relativeTime).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(session.relativeTime).font(.system(size: 12)).foregroundStyle(.secondary)
             }
             ForEach(session.backgroundAgents) { agent in
                 HStack(spacing: 6) {
                     Circle().fill(agentStatusColor(agent.status)).frame(width: 6, height: 6)
-                    Text(agent.name).font(.system(size: 11, weight: .medium)).foregroundStyle(.blue)
-                    Text(agent.task).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(agent.name).font(.system(size: 12, weight: .medium)).foregroundStyle(.blue)
+                    Text(agent.task).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .padding(.leading, 4)
             }
