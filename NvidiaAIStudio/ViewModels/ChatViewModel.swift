@@ -90,7 +90,7 @@ final class ChatViewModel {
             let messagesToSend = await MainActor.run {
                 var msgs = [SystemPrompt.asMessage()]
                 msgs += (appState.activeSession?.messages ?? [])
-                    .filter { $0.id != streamingID && (!$0.content.isEmpty || $0.role == .system || $0.role == .tool) }
+                    .filter { $0.id != streamingID && (!$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil) }
                 return msgs
             }
             
