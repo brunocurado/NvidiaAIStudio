@@ -190,7 +190,7 @@ final class NVIDIAAPIService: AIProvider {
             // Mistral-style: only supports "high" and "none"
             switch reasoningLevel {
             case .high, .medium: body["reasoning_effort"] = "high"
-            case .low, .off: body["reasoning_effort"] = "none"
+            case .low, .off: break // Mistral: omit param entirely for no reasoning
             }
         } else if supportsThinking(modelID: model.id) && reasoningLevel != .off {
             // Qwen/DeepSeek-style: uses reasoning object with budget
