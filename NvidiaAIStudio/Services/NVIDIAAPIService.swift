@@ -67,6 +67,9 @@ final class NVIDIAAPIService: AIProvider {
     private let thinkingKeywords = ["deepseek-r1", "kimi", "qwq"]
     private let thinkingQwenSuffix = "thinking"
     
+    // Models that use reasoning_effort instead of reasoning.type
+    private let reasoningEffortModels = ["mistral-small-4", "mistral-medium-3", "mistral-large-3"]
+    
     init(apiKey: String, baseURL: String = "https://integrate.api.nvidia.com/v1") {
         self.apiKey = apiKey
         self.baseURL = baseURL
@@ -83,7 +86,15 @@ final class NVIDIAAPIService: AIProvider {
         if lower.contains("qwen") {
             return lower.contains(thinkingQwenSuffix)
         }
+        // Mistral models use reasoning_effort (handled separately)
+        if usesReasoningEffort(modelID: lower) { return false }
         return thinkingKeywords.contains { lower.contains($0) }
+    }
+    
+    /// Whether a model uses reasoning_effort parameter (Mistral-style).
+    private func usesReasoningEffort(modelID: String) -> Bool {
+        let lower = modelID.lowercased()
+        return reasoningEffortModels.contains { lower.contains($0) }
     }
     
     func chat(
@@ -168,14 +179,23 @@ final class NVIDIAAPIService: AIProvider {
         let apiMessages = messages.map { $0.toAPIDict() }
         body["messages"] = apiMessages
         
-        // Add tools if provided and thinking allows
-        if let tools, !tools.isEmpty, reasoningLevel == .off || !supportsThinking(modelID: model.id) {
+        // Add tools if provided (Mistral supports tools + reasoning_effort simultaneously)
+        if let tools, !tools.isEmpty, reasoningLevel == .off || !supportsThinking(modelID: model.id) || usesReasoningEffort(modelID: model.id) {
             body["tools"] = tools
             body["tool_choice"] = "auto"
         }
         
         // Add thinking parameters
-        if supportsThinking(modelID: model.id) && reasoningLevel != .off {
+        if usesReasoningEffort(modelID: model.id) {
+            // Mistral-style: uses reasoning_effort top-level parameter
+            switch reasoningLevel {
+            case .high: body["reasoning_effort"] = "high"
+            case .medium: body["reasoning_effort"] = "medium"
+            case .low: body["reasoning_effort"] = "low"
+            case .off: break // Don't send reasoning_effort when off
+            }
+        } else if supportsThinking(modelID: model.id) && reasoningLevel != .off {
+            // Qwen/DeepSeek-style: uses reasoning object with budget
             let budget: Int
             switch reasoningLevel {
             case .high: budget = 10000
@@ -202,7 +222,17 @@ final class NVIDIAAPIService: AIProvider {
         case 401: throw APIServiceError.unauthorized
         case 429: throw APIServiceError.rateLimited(retryAfter: nil)
         case 400...599:
-            throw APIServiceError.serverError(statusCode: httpResponse.statusCode, message: "HTTP \(httpResponse.statusCode)")
+            // Try to read error body for better diagnostics
+            var errorBody = "HTTP \(httpResponse.statusCode)"
+            var collectedLines: [String] = []
+            for try await line in bytes.lines {
+                collectedLines.append(line)
+                if collectedLines.count > 5 { break }
+            }
+            if !collectedLines.isEmpty {
+                errorBody = collectedLines.joined(separator: " ")
+            }
+            throw APIServiceError.serverError(statusCode: httpResponse.statusCode, message: errorBody)
         default:
             throw APIServiceError.serverError(statusCode: httpResponse.statusCode, message: "Unexpected status")
         }
