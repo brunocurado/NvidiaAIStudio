@@ -72,8 +72,8 @@ final class NVIDIAAPIService: AIProvider {
         self.baseURL = baseURL
         
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300  // 5 min — supports deep-thinking models (Kimi, DeepSeek R1, etc.)
-        config.timeoutIntervalForResource = 600 // 10 min max for the full resource transfer
+        config.timeoutIntervalForRequest = 3600  // 60 min — supports any model including large thinking models
+        config.timeoutIntervalForResource = 7200  // 2h max for the full resource transfer
         self.session = URLSession(configuration: config)
     }
     

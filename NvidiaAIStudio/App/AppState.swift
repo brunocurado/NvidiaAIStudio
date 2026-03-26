@@ -318,6 +318,7 @@ final class AppState {
     
     /// Initialize: load sessions, API keys, env-based API key fallback, and fetch live models.
     func bootstrap() {
+        KeychainHelper.migrateIfNeeded()  // one-time migration to AfterFirstUnlock
         loadSessions()
         loadGitHubCredentials()
         loadAPIKeys()

@@ -60,13 +60,15 @@ enum ModelFetcher {
     /// Patterns that indicate thinking/reasoning support
     private static let thinkingPatterns = [
         "thinking", "deepseek", "qwq", "kimi", "o1", "o3", "o4",
-        "qwen3-next", "qwen3.5", "nemotron-3-super"
+        "qwen3-next", "qwen3.5", "nemotron-3-super",
+        "mistral-small-4", "mistral-medium-3", "mistral-large-3"
     ]
     
     /// Patterns that indicate vision/multimodal support
     private static let visionPatterns = [
         "-vl", "vision", "multimodal", "qwen3.5-122b", "qwen3.5-397b",
-        "mistral-large-3", "nemotron-nano-12b-v2-vl", "gpt-4o", "gpt-4.1"
+        "mistral-large-3", "mistral-small-4", "mistral-medium-3",
+        "nemotron-nano-12b-v2-vl", "gpt-4o", "gpt-4.1"
     ]
     
     // MARK: - Fetch

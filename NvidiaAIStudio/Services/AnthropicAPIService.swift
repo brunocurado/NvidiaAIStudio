@@ -16,8 +16,8 @@ final class AnthropicAPIService: AIProvider {
         self.baseURL = baseURL
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
-        config.timeoutIntervalForResource = 600
+        config.timeoutIntervalForRequest = 3600
+        config.timeoutIntervalForResource = 7200
         self.session = URLSession(configuration: config)
     }
 
