@@ -91,7 +91,7 @@ final class ChatViewModel {
                 var msgs = [SystemPrompt.asMessage()]
                 msgs += (appState.activeSession?.messages ?? [])
                     .filter { $0.id != streamingID && (!$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil) }
-                return msgs
+                return self.sanitizeMessages(msgs)
             }
             
             var accContent = ""
@@ -252,6 +252,39 @@ final class ChatViewModel {
         
         let textContent = summary.isEmpty ? "Analysing \(attachments.count) image(s)..." : summary
         return (textContent, attachments)
+    }
+    
+    // MARK: - Message Sanitization
+    
+    /// Ensures the message array has valid role ordering for strict APIs (Mistral, etc).
+    /// Rules enforced:
+    ///   1. `tool` messages must be preceded by `assistant` with `toolCalls`
+    ///   2. `tool` messages must NOT be directly followed by `user` — an `assistant` bridge is injected
+    ///   3. Orphaned `tool` messages (no preceding assistant+toolCalls) are removed
+    private func sanitizeMessages(_ messages: [Message]) -> [Message] {
+        var result: [Message] = []
+        
+        for msg in messages {
+            if msg.role == .tool {
+                // Rule 1: tool must follow assistant with toolCalls
+                guard let prev = result.last, prev.role == .assistant, prev.toolCalls != nil else {
+                    continue // Drop orphaned tool message
+                }
+            }
+            result.append(msg)
+        }
+        
+        // Rule 2: Ensure no tool→user transition without an assistant in between
+        var sanitized: [Message] = []
+        for msg in result {
+            if msg.role == .user, let prev = sanitized.last, prev.role == .tool {
+                // Inject a synthetic assistant bridge
+                sanitized.append(Message(role: .assistant, content: "Understood. Continuing..."))
+            }
+            sanitized.append(msg)
+        }
+        
+        return sanitized
     }
     
     // MARK: - Helpers
