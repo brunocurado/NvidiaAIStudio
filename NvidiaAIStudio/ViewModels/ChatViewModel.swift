@@ -265,77 +265,31 @@ final class ChatViewModel {
         var result: [Message] = []
         
         for msg in messages {
+            // Rule 1: tool must follow assistant with toolCalls
             if msg.role == .tool {
-                // Rule 1: tool must follow assistant with toolCalls
                 guard let prev = result.last, prev.role == .assistant, prev.toolCalls != nil else {
-                    continue // Drop orphaned tool message
-                }
-            }
-            // Rule 2: Don't allow consecutive messages with the same role (except tool after tool)
-            if let prev = result.last, prev.role == msg.role, msg.role != .tool {
-                // Merge content into previous message of same role
-                if msg.role == .user || msg.role == .assistant {
-                    result[result.count - 1] = Message(
-                        id: prev.id,
-                        role: prev.role,
-                        content: prev.content + "\n" + msg.content,
-                        reasoning: msg.reasoning ?? prev.reasoning,
-                        toolCalls: msg.toolCalls ?? prev.toolCalls,
-                        toolCallId: msg.toolCallId ?? prev.toolCallId
-                    )
                     continue
                 }
+            }
+            // Rule 2: Merge consecutive same-role messages (except tool)
+            if let prev = result.last, prev.role == msg.role, msg.role != .tool {
+                result[result.count - 1] = Message(
+                    id: prev.id, role: prev.role,
+                    content: prev.content + "\n" + msg.content,
+                    reasoning: msg.reasoning ?? prev.reasoning,
+                    toolCalls: msg.toolCalls ?? prev.toolCalls,
+                    toolCallId: msg.toolCallId ?? prev.toolCallId
+                )
+                continue
+            }
+            // Rule 3: Bridge tool→user with assistant
+            if msg.role == .user, let prev = result.last, prev.role == .tool {
+                result.append(Message(role: .assistant, content: "Understood. Continuing..."))
             }
             result.append(msg)
         }
         
-        // Rule 3: Ensure no tool→user transition without an assistant in between
-        var sanitized: [Message] = []
-        for msg in result {
-            if msg.role == .user, let prev = sanitized.last, prev.role == .tool {
-                // Inject a synthetic assistant bridge
-                sanitized.append(Message(role: .assistant, content: "Understood. Continuing..."))
-            }
-            sanitized.append(msg)
-        }
-        
-        // Rule 4: Ensure every assistant tool_call has a matching tool response
-        var final: [Message] = []
-        for (i, msg) in sanitized.enumerated() {
-            if msg.role == .assistant, let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
-                // Collect following tool messages
-                var toolResponseIds = Set<String>()
-                for j in (i+1)..<sanitized.count {
-                    if sanitized[j].role == .tool, let tcId = sanitized[j].toolCallId {
-                        toolResponseIds.insert(tcId)
-                    } else {
-                        break
-                    }
-                }
-                // Filter tool_calls to only those with matching responses
-                let matchedCalls = toolCalls.filter { toolResponseIds.contains($0.id) }
-                if matchedCalls.isEmpty {
-                    // No matching tool responses — strip tool_calls from assistant message
-                    final.append(Message(
-                        id: msg.id,
-                        role: .assistant,
-                        content: msg.content.isEmpty ? "I attempted to use tools but encountered an issue." : msg.content,
-                        reasoning: msg.reasoning
-                    ))
-                } else if matchedCalls.count < toolCalls.count {
-                    // Partial match — only keep matched tool_calls
-                    var cleaned = msg
-                    cleaned.toolCalls = matchedCalls
-                    final.append(cleaned)
-                } else {
-                    final.append(msg)
-                }
-            } else {
-                final.append(msg)
-            }
-        }
-        
-        return final
+        return result
     }
     
     // MARK: - Helpers

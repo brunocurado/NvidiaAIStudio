@@ -21,6 +21,7 @@ actor SessionStore {
     }
     
     /// Load all sessions from disk, sorted by update date.
+    /// Only loads metadata (title, dates, id) — messages are loaded on demand.
     func loadAll() -> [Session] {
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: sessionsDir,
@@ -37,7 +38,15 @@ actor SessionStore {
             }
             .sorted { $0.updatedAt > $1.updatedAt }
         
-        return sessions
+        // Trim: keep only the last 50 messages per session in memory
+        return sessions.map { session in
+            var trimmed = session
+            if trimmed.messages.count > 50 {
+                let kept = Array(trimmed.messages.suffix(50))
+                trimmed.messages = kept
+            }
+            return trimmed
+        }
     }
     
     /// Save a single session to disk.

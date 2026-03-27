@@ -13,11 +13,9 @@ struct ChatView: View {
                 // Messages
                 ScrollViewReader { proxy in
                     ScrollView {
-                        // VStack (not Lazy) — ensures all messages are always rendered
-                        // so scrollTo("bottom-anchor") is always reliable.
-                        // Chat sessions rarely exceed 100 messages so lazy loading
-                        // is not needed and causes scroll failures.
-                        VStack(spacing: 16) {
+                        // LazyVStack — renders only visible messages for performance.
+                        // Sessions can grow to 100+ messages with tool results and attachments.
+                        LazyVStack(spacing: 16) {
                             ForEach(session.messages) { message in
                                 MessageBubbleView(message: message)
                                     .id(message.id)
