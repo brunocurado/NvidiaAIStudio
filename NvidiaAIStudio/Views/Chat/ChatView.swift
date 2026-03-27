@@ -44,25 +44,27 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity)
                     }
                     .onChange(of: session.messages.count) {
-                        scrollToBottom(proxy: proxy)
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
                     .onChange(of: viewModel.streamingStatus) {
                         guard viewModel.isStreaming else { return }
-                        scrollToBottom(proxy: proxy)
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
                     .onChange(of: viewModel.isStreaming) {
-                        scrollToBottom(proxy: proxy)
-                    }
-                    .onChange(of: lastMessageContent(session)) {
-                        guard viewModel.isStreaming else { return }
-                        scrollToBottom(proxy: proxy)
+                        if viewModel.isStreaming {
+                            // Start a periodic scroll timer during streaming
+                            startScrollTimer(proxy: proxy)
+                        } else {
+                            stopScrollTimer()
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        }
                     }
                     .onAppear {
-                        scrollToBottom(proxy: proxy)
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
                     .onChange(of: session.id) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            scrollToBottom(proxy: proxy)
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
                     }
                 }
@@ -138,23 +140,22 @@ struct ChatView: View {
     
     // MARK: - Scroll Helpers
     
-    /// Scroll to the bottom anchor with a small delay to allow SwiftUI to finish layout.
-    /// Uses two attempts: immediate + delayed, to handle both fast updates and slow renders.
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.15)) {
-            proxy.scrollTo("bottom-anchor", anchor: .bottom)
-        }
-        // Second attempt after layout completes (fixes tool execution & reasoning blank screen)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+    @State private var scrollTimer: Timer?
+    
+    /// Start a lightweight periodic scroll during streaming.
+    /// Scrolls 3x/second — enough to track content without killing performance.
+    private func startScrollTimer(proxy: ScrollViewProxy) {
+        stopScrollTimer()
+        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { _ in
+            DispatchQueue.main.async {
+                proxy.scrollTo("bottom-anchor", anchor: .bottom)
+            }
         }
     }
     
-    /// Track the last message's content length to trigger scroll during streaming.
-    /// This catches content growth within a single message (not just new messages).
-    private func lastMessageContent(_ session: Session) -> Int {
-        guard let last = session.messages.last else { return 0 }
-        return last.content.count + (last.reasoning?.count ?? 0) + (last.toolCalls?.count ?? 0)
+    private func stopScrollTimer() {
+        scrollTimer?.invalidate()
+        scrollTimer = nil
     }
 }
 
