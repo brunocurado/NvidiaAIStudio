@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var showGitPanel = false
     @State private var showCloneSheet = false
     @State private var showUsagePanel = false
+    @State private var rightPanelWidth: CGFloat = 400
 
     private var theme: AppTheme { AppTheme.find(id: appThemeID) }
 
@@ -66,11 +67,30 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
 
                 if appState.isRightPanelVisible {
-                    Divider()
+                    // Draggable divider for right panel resize
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(width: 6)
+                        .contentShape(Rectangle())
+                        .onHover { hovering in
+                            if hovering {
+                                NSCursor.resizeLeftRight.push()
+                            } else {
+                                NSCursor.pop()
+                            }
+                        }
+                        .gesture(
+                            DragGesture(minimumDistance: 1)
+                                .onChanged { value in
+                                    let newWidth = rightPanelWidth - value.translation.width
+                                    rightPanelWidth = max(250, min(800, newWidth))
+                                }
+                        )
+                        .overlay(Divider())
                         .transition(.opacity)
                     
                     RightPanelView()
-                        .frame(width: 400)
+                        .frame(width: rightPanelWidth)
                         .background(.ultraThinMaterial.opacity(0.3))
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
