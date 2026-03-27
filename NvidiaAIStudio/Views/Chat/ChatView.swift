@@ -13,15 +13,16 @@ struct ChatView: View {
                 // Messages
                 ScrollViewReader { proxy in
                     ScrollView {
-                        // LazyVStack — renders only visible messages for performance.
-                        // Sessions can grow to 100+ messages with tool results and attachments.
-                        LazyVStack(spacing: 16) {
-                            ForEach(session.messages) { message in
-                                MessageBubbleView(message: message)
-                                    .id(message.id)
+                        VStack(spacing: 0) {
+                            // LazyVStack — renders only visible messages for performance.
+                            LazyVStack(spacing: 16) {
+                                ForEach(session.messages) { message in
+                                    MessageBubbleView(message: message)
+                                        .id(message.id)
+                                }
                             }
-
-                            // Streaming status pill
+                            
+                            // Streaming status pill — outside LazyVStack so always visible
                             if viewModel.isStreaming {
                                 HStack(spacing: 8) {
                                     ProgressView().scaleEffect(0.7)
@@ -31,9 +32,10 @@ struct ChatView: View {
                                     Spacer()
                                 }
                                 .padding(.horizontal, 24)
+                                .padding(.top, 8)
                             }
-
-                            // Bottom anchor — always rendered, always reachable
+                            
+                            // Bottom anchor — OUTSIDE LazyVStack so always rendered
                             Color.clear
                                 .frame(height: 1)
                                 .id("bottom-anchor")
