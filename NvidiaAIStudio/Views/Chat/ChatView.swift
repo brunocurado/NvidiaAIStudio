@@ -18,8 +18,8 @@ struct ChatView: View {
                                 MessageBubbleView(message: message)
                                     .id(message.id)
                             }
-                            
-                            // Streaming indicator
+
+                            // Streaming indicator — always rendered at bottom during stream
                             if viewModel.isStreaming {
                                 HStack(spacing: 8) {
                                     ProgressView()
@@ -30,35 +30,38 @@ struct ChatView: View {
                                     Spacer()
                                 }
                                 .padding(.horizontal, 24)
-                                .id("streaming-indicator")
                             }
+
+                            // Invisible anchor always at the very bottom
+                            Color.clear.frame(height: 1).id("bottom-anchor")
                         }
                         .padding(.vertical, 16)
                     }
+                    // Scroll when a new message is added
                     .onChange(of: session.messages.count) {
-                        // Only scroll when new messages are added, not on every content update
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            if viewModel.isStreaming {
-                                proxy.scrollTo("streaming-indicator", anchor: .bottom)
-                            } else if let lastID = session.messages.last?.id {
-                                proxy.scrollTo(lastID, anchor: .bottom)
-                            }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
                     }
-                    .onChange(of: viewModel.isStreaming) {
+                    // Scroll on every streaming chunk (status changes each chunk)
+                    .onChange(of: viewModel.streamingStatus) {
                         if viewModel.isStreaming {
-                            proxy.scrollTo("streaming-indicator")
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
                     }
+                    // Scroll when streaming starts or ends
+                    .onChange(of: viewModel.isStreaming) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        }
+                    }
+                    // Scroll on session open
                     .onAppear {
-                        if let lastID = session.messages.last?.id {
-                            proxy.scrollTo(lastID)
-                        }
+                        proxy.scrollTo("bottom-anchor")
                     }
+                    // Scroll when switching sessions
                     .onChange(of: session.id) {
-                        if let lastID = session.messages.last?.id {
-                            proxy.scrollTo(lastID)
-                        }
+                        proxy.scrollTo("bottom-anchor")
                     }
                 }
                 

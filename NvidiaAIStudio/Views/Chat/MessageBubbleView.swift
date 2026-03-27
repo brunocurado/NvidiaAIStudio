@@ -30,15 +30,26 @@ struct MessageBubbleView: View {
                     ReasoningView(content: reasoning, isLive: message.isStreaming)
                 }
                 
-                // Content with Markdown rendering
-                // During streaming with thinking models, content may be empty while reasoning fills;
-                // show a placeholder to prevent the bubble from collapsing
-                if !message.content.isEmpty {
+                // Content bubble.
+                // Always shown for user messages with content.
+                // For assistant: shown if there is content, OR if still streaming
+                // (covers thinking phase, tool-only responses, and any other state
+                // where content is temporarily empty mid-stream).
+                let hasContent = !message.content.isEmpty
+                let showBubble = hasContent || (message.role == .assistant && message.isStreaming)
+
+                if showBubble {
                     Group {
                         if message.role == .assistant {
-                            Markdown(message.content)
-                                .markdownTheme(.nvidia)
-                                .textSelection(.enabled)
+                            if hasContent {
+                                Markdown(message.content)
+                                    .markdownTheme(.nvidia)
+                                    .textSelection(.enabled)
+                            } else {
+                                // Empty placeholder — keeps the bubble alive during
+                                // thinking / tool-only streaming phases.
+                                StreamingDotsView()
+                            }
                         } else {
                             Text(message.content)
                                 .font(.body)
@@ -498,6 +509,17 @@ struct ReasoningView: View {
         .onAppear {
             if isLive {
                 wasAutoExpanded = true
+                withAnimation(.spring(duration: 0.25)) {
+                    isExpanded = true
+                }
+            }
+        }
+        .onChange(of: content) {
+            // Keep expanded and scrolled to bottom while live
+            if isLive && !isExpanded {
+                withAnimation(.spring(duration: 0.25)) {
+                    isExpanded = true
+                }
             }
         }
     }
