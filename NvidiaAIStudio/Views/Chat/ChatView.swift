@@ -51,13 +51,7 @@ struct ChatView: View {
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
                     .onChange(of: viewModel.isStreaming) {
-                        if viewModel.isStreaming {
-                            // Start a periodic scroll timer during streaming
-                            startScrollTimer(proxy: proxy)
-                        } else {
-                            stopScrollTimer()
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                        }
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
                     .onAppear {
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
@@ -138,25 +132,7 @@ struct ChatView: View {
         }
     }
     
-    // MARK: - Scroll Helpers
-    
-    @State private var scrollTimer: Timer?
-    
-    /// Start a lightweight periodic scroll during streaming.
-    /// Scrolls 3x/second — enough to track content without killing performance.
-    private func startScrollTimer(proxy: ScrollViewProxy) {
-        stopScrollTimer()
-        scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.33, repeats: true) { _ in
-            DispatchQueue.main.async {
-                proxy.scrollTo("bottom-anchor", anchor: .bottom)
-            }
-        }
-    }
-    
-    private func stopScrollTimer() {
-        scrollTimer?.invalidate()
-        scrollTimer = nil
-    }
+
 }
 
 // MARK: - Export Document
