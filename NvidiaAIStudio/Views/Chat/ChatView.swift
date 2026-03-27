@@ -19,49 +19,50 @@ struct ChatView: View {
                                     .id(message.id)
                             }
 
-                            // Streaming indicator — always rendered at bottom during stream
+                            // Streaming status indicator
                             if viewModel.isStreaming {
                                 HStack(spacing: 8) {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
+                                    ProgressView().scaleEffect(0.7)
                                     Text(viewModel.streamingStatus)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     Spacer()
                                 }
                                 .padding(.horizontal, 24)
+                                .id("streaming-status")
                             }
 
-                            // Invisible anchor always at the very bottom
-                            Color.clear.frame(height: 1).id("bottom-anchor")
+                            // Permanent bottom anchor — always in DOM regardless of streaming
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom-anchor")
                         }
                         .padding(.vertical, 16)
+                        // This makes the VStack fill the ScrollView width,
+                        // ensuring the anchor is always reachable
+                        .frame(maxWidth: .infinity)
                     }
-                    // Scroll when a new message is added
+                    // New message added
                     .onChange(of: session.messages.count) {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                        }
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
-                    // Scroll on every streaming chunk (status changes each chunk)
+                    // Every streaming chunk — streamingStatus changes on each token
                     .onChange(of: viewModel.streamingStatus) {
-                        if viewModel.isStreaming {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                        }
+                        guard viewModel.isStreaming else { return }
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
-                    // Scroll when streaming starts or ends
+                    // Streaming toggled on/off
                     .onChange(of: viewModel.isStreaming) {
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                    }
+                    // Session opened or switched
+                    .onAppear {
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                    }
+                    .onChange(of: session.id) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             proxy.scrollTo("bottom-anchor", anchor: .bottom)
                         }
-                    }
-                    // Scroll on session open
-                    .onAppear {
-                        proxy.scrollTo("bottom-anchor")
-                    }
-                    // Scroll when switching sessions
-                    .onChange(of: session.id) {
-                        proxy.scrollTo("bottom-anchor")
                     }
                 }
                 
