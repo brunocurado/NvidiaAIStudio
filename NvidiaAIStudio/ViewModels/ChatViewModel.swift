@@ -7,10 +7,12 @@ final class ChatViewModel {
     var contextUsage: Double = 0.0
     var estimatedTokenCount: Int = 0
     var maxTokens: Int = 200_000
+    var scrollTick: UInt = 0  // Increments periodically during streaming to trigger scroll
     @MainActor var pendingUserInterrupt: String? = nil
     
     private var streamTask: Task<Void, Never>?
     private let skillRegistry = SkillRegistry.shared
+    private var lastScrollTime: ContinuousClock.Instant = .now
     
     @MainActor
     func sendMessage(_ text: String, attachments: [Message.Attachment] = [], appState: AppState) async {
@@ -113,6 +115,12 @@ final class ChatViewModel {
                     let snapToolCalls = accToolCalls
                     await MainActor.run {
                         self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: snapContent, reasoning: snapReasoning, toolCalls: snapToolCalls, isStreaming: true), in: appState)
+                        // Throttled scroll tick: at most every 300ms
+                        let now = ContinuousClock.now
+                        if now - self.lastScrollTime >= .milliseconds(300) {
+                            self.scrollTick &+= 1
+                            self.lastScrollTime = now
+                        }
                     }
                 }
                 

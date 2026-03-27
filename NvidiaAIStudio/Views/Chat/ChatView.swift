@@ -53,6 +53,9 @@ struct ChatView: View {
                     .onChange(of: viewModel.isStreaming) {
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
+                    .onChange(of: viewModel.scrollTick) {
+                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                    }
                     .onAppear {
                         proxy.scrollTo("bottom-anchor", anchor: .bottom)
                     }
