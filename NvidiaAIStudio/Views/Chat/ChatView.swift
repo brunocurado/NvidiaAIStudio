@@ -13,13 +13,17 @@ struct ChatView: View {
                 // Messages
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 16) {
+                        // VStack (not Lazy) — ensures all messages are always rendered
+                        // so scrollTo("bottom-anchor") is always reliable.
+                        // Chat sessions rarely exceed 100 messages so lazy loading
+                        // is not needed and causes scroll failures.
+                        VStack(spacing: 16) {
                             ForEach(session.messages) { message in
                                 MessageBubbleView(message: message)
                                     .id(message.id)
                             }
 
-                            // Streaming status indicator
+                            // Streaming status pill
                             if viewModel.isStreaming {
                                 HStack(spacing: 8) {
                                     ProgressView().scaleEffect(0.7)
@@ -29,39 +33,36 @@ struct ChatView: View {
                                     Spacer()
                                 }
                                 .padding(.horizontal, 24)
-                                .id("streaming-status")
                             }
 
-                            // Permanent bottom anchor — always in DOM regardless of streaming
+                            // Bottom anchor — always rendered, always reachable
                             Color.clear
                                 .frame(height: 1)
                                 .id("bottom-anchor")
                         }
                         .padding(.vertical, 16)
-                        // This makes the VStack fill the ScrollView width,
-                        // ensuring the anchor is always reachable
                         .frame(maxWidth: .infinity)
                     }
-                    // New message added
                     .onChange(of: session.messages.count) {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        scrollToBottom(proxy: proxy)
                     }
-                    // Every streaming chunk — streamingStatus changes on each token
                     .onChange(of: viewModel.streamingStatus) {
                         guard viewModel.isStreaming else { return }
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        scrollToBottom(proxy: proxy)
                     }
-                    // Streaming toggled on/off
                     .onChange(of: viewModel.isStreaming) {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        scrollToBottom(proxy: proxy)
                     }
-                    // Session opened or switched
+                    .onChange(of: lastMessageContent(session)) {
+                        guard viewModel.isStreaming else { return }
+                        scrollToBottom(proxy: proxy)
+                    }
                     .onAppear {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        scrollToBottom(proxy: proxy)
                     }
                     .onChange(of: session.id) {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                            scrollToBottom(proxy: proxy)
                         }
                     }
                 }
@@ -133,6 +134,27 @@ struct ChatView: View {
             NewAgentSheet()
                 .environment(appState)
         }
+    }
+    
+    // MARK: - Scroll Helpers
+    
+    /// Scroll to the bottom anchor with a small delay to allow SwiftUI to finish layout.
+    /// Uses two attempts: immediate + delayed, to handle both fast updates and slow renders.
+    private func scrollToBottom(proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+        }
+        // Second attempt after layout completes (fixes tool execution & reasoning blank screen)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+        }
+    }
+    
+    /// Track the last message's content length to trigger scroll during streaming.
+    /// This catches content growth within a single message (not just new messages).
+    private func lastMessageContent(_ session: Session) -> Int {
+        guard let last = session.messages.last else { return 0 }
+        return last.content.count + (last.reasoning?.count ?? 0) + (last.toolCalls?.count ?? 0)
     }
 }
 
