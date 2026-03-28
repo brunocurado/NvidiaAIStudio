@@ -280,9 +280,9 @@ final class MCPConnection: Identifiable {
             pendingRequests[id] = cont
             let payload = (line + "\n").data(using: .utf8)!
             inputPipe?.fileHandleForWriting.write(payload)
-            // Timeout after 30s
+            // Timeout after 120s (npx may need time to download on first run)
             Task {
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(120))
                 if let cont = self.pendingRequests.removeValue(forKey: id) {
                     cont.resume(throwing: SkillError.executionFailed("MCP request timed out"))
                 }
