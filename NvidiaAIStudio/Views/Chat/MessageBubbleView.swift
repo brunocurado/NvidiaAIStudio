@@ -42,7 +42,12 @@ struct MessageBubbleView: View {
                     Group {
                         if message.role == .assistant {
                             if hasContent {
-                                Markdown(message.content)
+                                // Limit markdown rendering to prevent stack overflow
+                                // on very long responses (5530+ recursion levels crash)
+                                let safeContent = message.content.count > 15000
+                                    ? String(message.content.prefix(15000)) + "\n\n*[Content truncated for display]*"
+                                    : message.content
+                                Markdown(safeContent)
                                     .markdownTheme(.nvidia)
                                     .textSelection(.enabled)
                             } else {

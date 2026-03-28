@@ -388,7 +388,7 @@ struct TerminalLine: Identifiable {
 /// Simple git diff helper
 enum GitHelper {
     static func getChangedFiles() async -> [DiffFile] {
-        let result = await ShellHelper.run("git diff --numstat 2>/dev/null")
+        let result = await ShellHelper.run("git diff HEAD --numstat 2>/dev/null || git diff --numstat 2>/dev/null")
         guard !result.output.isEmpty else { return [] }
         
         var files: [DiffFile] = []
@@ -402,7 +402,7 @@ enum GitHelper {
             let filename = String(parts[2])
             
             // Get the actual diff for this file
-            let diffResult = await ShellHelper.run("git diff -- \"\(filename)\" 2>/dev/null")
+            let diffResult = await ShellHelper.run("git diff HEAD -- \"\(filename)\" 2>/dev/null || git diff -- \"\(filename)\" 2>/dev/null")
             let diffLines = parseDiffLines(diffResult.output)
             
             files.append(DiffFile(

@@ -297,7 +297,29 @@ final class ChatViewModel {
             result.append(msg)
         }
         
-        return result
+        // Rule 4: Strip unmatched tool_calls (Mistral requires exact match)
+        var toolResponseIds = Set<String>()
+        for msg in result where msg.role == .tool {
+            if let tcId = msg.toolCallId { toolResponseIds.insert(tcId) }
+        }
+        
+        return result.map { msg in
+            guard msg.role == .assistant, let toolCalls = msg.toolCalls, !toolCalls.isEmpty else {
+                return msg
+            }
+            let matched = toolCalls.filter { toolResponseIds.contains($0.id) }
+            if matched.count == toolCalls.count { return msg }
+            var cleaned = msg
+            if matched.isEmpty {
+                cleaned.toolCalls = nil
+                if cleaned.content.isEmpty {
+                    cleaned.content = "I attempted to use tools but encountered an issue."
+                }
+            } else {
+                cleaned.toolCalls = matched
+            }
+            return cleaned
+        }
     }
     
     // MARK: - Helpers

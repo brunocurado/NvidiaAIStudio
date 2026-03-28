@@ -176,6 +176,7 @@ struct ConversationDocument: FileDocument {
 
 /// Floating background agents panel (matches reference: "2 background agents").
 struct BackgroundAgentsPanelView: View {
+    @Environment(AppState.self) private var appState
     let agents: [BackgroundAgent]
     @State private var isExpanded = true
     @State private var selectedAgentID: UUID? = nil
@@ -232,9 +233,28 @@ struct BackgroundAgentsPanelView: View {
                             
                             Spacer()
                             
-                            Button("Open") {
-                                selectedAgentID = agent.id
-                                showAgentDetail = true
+                            if agent.status == .thinking || agent.status == .running || agent.status == .reading {
+                                Button("Stop") {
+                                    appState.mutateActiveSession { session in
+                                        if let idx = session.backgroundAgents.firstIndex(where: { $0.id == agent.id }) {
+                                            session.backgroundAgents[idx].status = .failed
+                                        }
+                                    }
+                                }
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.orange)
+                            }
+                            
+                            Button(agent.status == .completed || agent.status == .failed ? "Remove" : "Open") {
+                                if agent.status == .completed || agent.status == .failed {
+                                    appState.mutateActiveSession { session in
+                                        session.backgroundAgents.removeAll { $0.id == agent.id }
+                                    }
+                                } else {
+                                    selectedAgentID = agent.id
+                                    showAgentDetail = true
+                                }
                             }
                             .font(.caption)
                             .fontWeight(.medium)
