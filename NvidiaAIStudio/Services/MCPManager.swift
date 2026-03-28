@@ -166,24 +166,43 @@ final class MCPConnection: Identifiable {
         guard case .stdio(let command, let args, let env) = config.transport else { return }
 
         let p = Process()
-        // Resolve command (support npx, node, python, etc.)
-        p.executableURL = URL(fileURLWithPath: resolveCommand(command))
+        let resolvedCmd = resolveCommand(command)
+        p.executableURL = URL(fileURLWithPath: resolvedCmd)
         p.arguments = args
 
+        // Build environment: inherit system env + inject nvm/node paths into PATH
         var environment = ProcessInfo.processInfo.environment
+        let nodeBinDir = URL(fileURLWithPath: resolvedCmd).deletingLastPathComponent().path
+        let existingPath = environment["PATH"] ?? "/usr/bin:/bin"
+        environment["PATH"] = "\(nodeBinDir):/usr/local/bin:/opt/homebrew/bin:\(existingPath)"
+        // Also set NODE_PATH for npx module resolution
+        let nodeBase = URL(fileURLWithPath: nodeBinDir).deletingLastPathComponent().path
+        environment["NODE_PATH"] = "\(nodeBase)/lib/node_modules"
         for (k, v) in env { environment[k] = v }
         p.environment = environment
 
         let inPipe = Pipe()
         let outPipe = Pipe()
+        let errPipe = Pipe()
         p.standardInput = inPipe
         p.standardOutput = outPipe
-        p.standardError = Pipe() // discard stderr
+        p.standardError = errPipe
 
         try p.run()
         self.process = p
         self.inputPipe = inPipe
         self.outputPipe = outPipe
+
+        // Capture stderr for error diagnostics
+        Task { [weak self] in
+            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
+            if let errText = String(data: data, encoding: .utf8), !errText.isEmpty {
+                let trimmed = errText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let strongSelf = self {
+                    await MainActor.run { strongSelf.lastError = trimmed }
+                }
+            }
+        }
 
         // Start reading output in background
         Task { [weak self] in await self?.readStdioOutput() }
