@@ -190,11 +190,16 @@ final class MCPConnection: Identifiable {
     }
 
     private func resolveCommand(_ cmd: String) -> String {
-        // Try common locations for node/npx/python
+        // If already an absolute path, use it directly
+        if cmd.hasPrefix("/") {
+            return cmd
+        }
+        // Otherwise search common locations for short names (npx, node, python, etc.)
         let candidates = [
             "/opt/homebrew/bin/\(cmd)",
             "/usr/local/bin/\(cmd)",
             "/usr/bin/\(cmd)",
+            "/Users/mac/.nvm/versions/node/v22.21.1/bin/\(cmd)",
             cmd
         ]
         return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? cmd
