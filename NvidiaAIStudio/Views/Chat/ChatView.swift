@@ -52,28 +52,12 @@ struct ChatView: View {
                             
                             // Streaming status pill — outside LazyVStack so always visible
                             if viewModel.isStreaming {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(spacing: 8) {
-                                        ProgressView().scaleEffect(0.7)
-                                        Text(viewModel.streamingStatus)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        Spacer()
-                                    }
-                                    
-                                    // Show live reasoning here (NOT in the message list)
-                                    if let reasoning = viewModel.liveReasoningText, !reasoning.isEmpty {
-                                        ScrollView {
-                                            Text(reasoning)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary.opacity(0.7))
-                                                .frame(maxWidth: .infinity, alignment: .leading)
-                                                .textSelection(.enabled)
-                                        }
-                                        .frame(maxHeight: 120)
-                                        .padding(10)
-                                        .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-                                    }
+                                HStack(spacing: 8) {
+                                    ProgressView().scaleEffect(0.7)
+                                    Text(viewModel.streamingStatus)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
                                 }
                                 .padding(.horizontal, 24)
                                 .padding(.top, 8)
@@ -325,6 +309,7 @@ struct BackgroundAgentsPanelView: View {
         .sheet(isPresented: $showAgentDetail) {
             if let id = selectedAgentID {
                 AgentDetailView(agentID: id)
+                    .environment(appState)
             }
         }
     }

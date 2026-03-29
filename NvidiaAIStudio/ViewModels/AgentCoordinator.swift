@@ -89,10 +89,13 @@ final class AgentRunner {
                 }
             } catch {
                 await coordinator?.set(id: task.id, status: .failed, result: "Error: \(error.localizedDescription)")
+                await coordinator?.setMessages(id: task.id, messages: messages)
                 return
             }
 
             messages.append(Message(role: .assistant, content: content, toolCalls: toolCalls))
+            // Sync messages in real-time so AgentDetailView shows live progress
+            await coordinator?.setMessages(id: task.id, messages: messages)
 
             if let tcs = toolCalls, !tcs.isEmpty {
                 await coordinator?.set(id: task.id, status: .reading, result: nil)
@@ -105,6 +108,8 @@ final class AgentRunner {
                     } catch { result = "Error: \(error.localizedDescription)" }
                     messages.append(Message(role: .tool, content: result, toolCallId: tc.id))
                 }
+                // Sync after tool results too
+                await coordinator?.setMessages(id: task.id, messages: messages)
                 continue
             }
 
