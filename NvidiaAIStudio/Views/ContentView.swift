@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var showGitPanel = false
     @State private var showCloneSheet = false
     @State private var showUsagePanel = false
+    @State private var showPromptLab = false
     @State private var rightPanelWidth: CGFloat = 400
 
     private var theme: AppTheme { AppTheme.find(id: appThemeID) }
@@ -123,6 +124,10 @@ struct ContentView: View {
         .sheet(isPresented: $showUsagePanel) {
             UsagePanelView()
         }
+        .sheet(isPresented: $showPromptLab) {
+            PromptLabView()
+                .environment(appState)
+        }
         .toolbar(showSplash ? .hidden : .visible, for: .windowToolbar)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -158,6 +163,14 @@ struct ContentView: View {
                 }
                 .buttonStyle(.glass)
                 .help("Clone Repository")
+
+                Button {
+                    showPromptLab = true
+                } label: {
+                    Image(systemName: "wand.and.stars")
+                }
+                .buttonStyle(.glass)
+                .help("Prompt Lab")
 
                 Button {
                     showUsagePanel = true
