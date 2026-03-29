@@ -340,7 +340,7 @@ enum PromptMasterLoader {
     static func loadSkill() -> String {
         // SPM bundles resources under Bundle.module
         if let url = Bundle.module.url(forResource: "SKILL", withExtension: "md", subdirectory: "PromptMaster"),
-           let content = try? String(contentsOf: url) {
+           let content = try? String(contentsOf: url, encoding: .utf8) {
             return content
         }
         

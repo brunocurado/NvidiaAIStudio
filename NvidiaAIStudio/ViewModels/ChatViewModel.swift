@@ -8,11 +8,13 @@ final class ChatViewModel {
     var estimatedTokenCount: Int = 0
     var maxTokens: Int = 200_000
     var scrollTick: UInt = 0  // Increments periodically during streaming to trigger scroll
+    var liveReasoningText: String? = nil  // Shown in streaming pill during thinking, NOT in message list
     @MainActor var pendingUserInterrupt: String? = nil
     
     private var streamTask: Task<Void, Never>?
     private let skillRegistry = SkillRegistry.shared
     private var lastScrollTime: ContinuousClock.Instant = .now
+    private var lastUIUpdateTime: ContinuousClock.Instant = .now
     
     @MainActor
     func sendMessage(_ text: String, attachments: [Message.Attachment] = [], appState: AppState) async {
@@ -54,6 +56,7 @@ final class ChatViewModel {
         streamTask?.cancel()
         streamTask = nil
         isStreaming = false
+        liveReasoningText = nil
     }
     
     // MARK: - Agent Loop
@@ -84,15 +87,18 @@ final class ChatViewModel {
             }
             
             let streamingID = UUID()
+            nonisolated(unsafe) var messageInserted = false  // Track whether we've added the bubble to the list
+            
             await MainActor.run {
-                appState.mutateActiveSession { $0.messages.append(Message(id: streamingID, role: .assistant, content: "", isStreaming: true)) }
+                // DON'T insert message yet — defer until content arrives
                 self.streamingStatus = model.supportsThinking ? "Thinking" : "Generating"
+                self.liveReasoningText = nil
             }
             
             let messagesToSend = await MainActor.run {
                 var msgs = [SystemPrompt.asMessage()]
                 msgs += (appState.activeSession?.messages ?? [])
-                    .filter { $0.id != streamingID && (!$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil) }
+                    .filter { !$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil }
                 return self.sanitizeMessages(msgs)
             }
             
@@ -106,17 +112,46 @@ final class ChatViewModel {
                 
                 for try await chunk in stream {
                     if Task.isCancelled { break }
+                    
+                    if let r = chunk.reasoning {
+                        accReasoning = (accReasoning ?? "") + r
+                        // Update reasoning in the status area, NOT in the message list
+                        let reasoningSnap = accReasoning
+                        await MainActor.run {
+                            self.streamingStatus = "Thinking"
+                            self.liveReasoningText = reasoningSnap
+                        }
+                    }
                     if let c = chunk.content { accContent += c; await MainActor.run { self.streamingStatus = "Writing" } }
-                    if let r = chunk.reasoning { accReasoning = (accReasoning ?? "") + r; await MainActor.run { self.streamingStatus = "Thinking" } }
                     if let tc = chunk.toolCalls { accToolCalls = tc; await MainActor.run { self.streamingStatus = "Running tools" } }
                     if let u = chunk.usage { accUsage = u }
+                    
+                    // Only create/update the message bubble when we have real content or tool calls
+                    let hasVisibleContent = !accContent.isEmpty || accToolCalls != nil
+                    guard hasVisibleContent else { continue }
+                    
                     let snapContent = accContent
                     let snapReasoning = accReasoning
                     let snapToolCalls = accToolCalls
+                    
+                    // Throttle UI updates to ~6/sec (every 150ms)
+                    let now = ContinuousClock.now
+                    let shouldUpdate = !messageInserted || now - self.lastUIUpdateTime >= .milliseconds(150)
+                    guard shouldUpdate else { continue }
+                    self.lastUIUpdateTime = now
+                    
                     await MainActor.run {
-                        self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: snapContent, reasoning: snapReasoning, toolCalls: snapToolCalls, isStreaming: true), in: appState)
-                        // Throttled scroll tick: at most every 300ms
-                        let now = ContinuousClock.now
+                        if !messageInserted {
+                            // First content chunk: create the message bubble
+                            appState.mutateActiveSession {
+                                $0.messages.append(Message(id: streamingID, role: .assistant, content: snapContent, reasoning: snapReasoning, toolCalls: snapToolCalls, isStreaming: true))
+                            }
+                            messageInserted = true
+                            self.liveReasoningText = nil  // Clear — now shown inside the bubble
+                        } else {
+                            self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: snapContent, reasoning: snapReasoning, toolCalls: snapToolCalls, isStreaming: true), in: appState)
+                        }
+                        // Throttled scroll tick
                         if now - self.lastScrollTime >= .milliseconds(300) {
                             self.scrollTick &+= 1
                             self.lastScrollTime = now
@@ -128,7 +163,16 @@ final class ChatViewModel {
                 let finalReasoning = accReasoning
                 let finalToolCalls = accToolCalls
                 await MainActor.run {
-                    self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: finalContent, reasoning: finalReasoning, toolCalls: finalToolCalls, isStreaming: false), in: appState)
+                    self.liveReasoningText = nil
+                    if !messageInserted {
+                        // Edge case: model returned only reasoning with no content (or empty response)
+                        appState.mutateActiveSession {
+                            $0.messages.append(Message(id: streamingID, role: .assistant, content: finalContent, reasoning: finalReasoning, toolCalls: finalToolCalls, isStreaming: false))
+                        }
+                        messageInserted = true
+                    } else {
+                        self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: finalContent, reasoning: finalReasoning, toolCalls: finalToolCalls, isStreaming: false), in: appState)
+                    }
                 }
                 
                 if let toolCalls = accToolCalls, !toolCalls.isEmpty {
@@ -191,15 +235,27 @@ final class ChatViewModel {
                     self.isStreaming = false
                     self.updateContextUsage(appState)
                     appState.saveActiveSession()
+                    // Record usage: prefer API-reported tokens, fallback to local estimation
+                    let promptTok: Int
+                    let completionTok: Int
                     if let usage = doneUsage {
-                        UsageStore.shared.append(UsageStore.Record(
-                            id: UUID(), date: Date(),
-                            provider: appState.activeProvider.rawValue,
-                            modelID: model.id, modelName: model.name,
-                            sessionTitle: appState.activeSession?.title ?? "Thread",
-                            promptTokens: usage.promptTokens, completionTokens: usage.completionTokens
-                        ))
+                        promptTok = usage.promptTokens
+                        completionTok = usage.completionTokens
+                    } else {
+                        // Estimate from local context: input = all messages before response, output = response content
+                        let inputChars = appState.activeSession?.messages
+                            .filter { $0.role != .assistant || $0.id != streamingID }
+                            .reduce(0) { $0 + $1.content.count + ($1.reasoning?.count ?? 0) } ?? 0
+                        promptTok = max(1, inputChars / 4)
+                        completionTok = max(1, doneContent.count / 4)
                     }
+                    UsageStore.shared.append(UsageStore.Record(
+                        id: UUID(), date: Date(),
+                        provider: appState.activeProvider.rawValue,
+                        modelID: model.id, modelName: model.name,
+                        sessionTitle: appState.activeSession?.title ?? "Thread",
+                        promptTokens: promptTok, completionTokens: completionTok
+                    ))
                     if doneContent.isEmpty && doneToolCalls == nil { appState.showToast("Empty response from model", level: .warning) }
                     let cleanName = String(model.name.drop(while: { !$0.isLetter && !$0.isNumber }))
                         .components(separatedBy: "—").first?.trimmingCharacters(in: .whitespaces) ?? model.name
@@ -211,8 +267,14 @@ final class ChatViewModel {
                 let errContent = accContent
                 let errReasoning = accReasoning
                 await MainActor.run {
+                    self.liveReasoningText = nil
                     let errorContent = errContent.isEmpty ? "⚠️ Error: \(error.localizedDescription)" : errContent + "\n\n⚠️ Error: \(error.localizedDescription)"
-                    self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: errorContent, reasoning: errReasoning, isStreaming: false), in: appState)
+                    let errorMsg = Message(id: streamingID, role: .assistant, content: errorContent, reasoning: errReasoning, isStreaming: false)
+                    if messageInserted {
+                        self.updateMessage(id: streamingID, with: errorMsg, in: appState)
+                    } else {
+                        appState.mutateActiveSession { $0.messages.append(errorMsg) }
+                    }
                     self.isStreaming = false
                     appState.showToast("API Error: \(error.localizedDescription)", level: .error)
                 }
@@ -222,6 +284,7 @@ final class ChatViewModel {
         
         await MainActor.run {
             self.isStreaming = false
+            self.liveReasoningText = nil
             appState.showToast("Agent loop reached maximum iterations (10)", level: .warning)
             appState.saveActiveSession()
         }

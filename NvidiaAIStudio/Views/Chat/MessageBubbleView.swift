@@ -32,11 +32,11 @@ struct MessageBubbleView: View {
                 
                 // Content bubble.
                 // Always shown for user messages with content.
-                // For assistant: shown if there is content, OR if still streaming
-                // (covers thinking phase, tool-only responses, and any other state
-                // where content is temporarily empty mid-stream).
+                // For assistant: shown if there is content. During streaming,
+                // only show the empty bubble if there is NO reasoning (avoids
+                // duplicate "thinking" indicators).
                 let hasContent = !message.content.isEmpty
-                let showBubble = hasContent || (message.role == .assistant && message.isStreaming)
+                let showBubble = hasContent || (message.role == .assistant && message.isStreaming && (message.reasoning ?? "").isEmpty)
 
                 if showBubble {
                     Group {
@@ -144,8 +144,8 @@ struct MessageBubbleView: View {
                     .padding(.top, 2)
                 }
                 
-                // Streaming cursor
-                if message.isStreaming {
+                // Streaming cursor — only when actively writing content (not during thinking)
+                if message.isStreaming && !message.content.isEmpty {
                     StreamingDotsView()
                 }
             }

@@ -6,6 +6,8 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var showExportPanel = false
     @State private var showNewAgentSheet = false
+    @State private var visibleMessageCount = 20
+    @State private var isUserNearBottom = true
     
     var body: some View {
         VStack(spacing: 0) {
@@ -14,9 +16,35 @@ struct ChatView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 0) {
+                            // "Load earlier messages" button
+                            let totalMessages = session.messages.count
+                            
+                            if totalMessages > visibleMessageCount {
+                                Button {
+                                    withAnimation(.spring(duration: 0.3)) {
+                                        visibleMessageCount += 20
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.up.circle")
+                                            .font(.caption)
+                                        Text("Load \(min(20, totalMessages - visibleMessageCount)) earlier messages")
+                                            .font(.caption)
+                                            .fontWeight(.medium)
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .padding(.vertical, 8)
+                                    .padding(.horizontal, 16)
+                                    .background(.white.opacity(0.05), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .frame(maxWidth: .infinity)
+                                .padding(.bottom, 8)
+                            }
+                            
                             // LazyVStack — renders only visible messages for performance.
                             LazyVStack(spacing: 16) {
-                                ForEach(session.messages) { message in
+                                ForEach(Array(session.messages.suffix(visibleMessageCount))) { message in
                                     MessageBubbleView(message: message)
                                         .id(message.id)
                                 }
@@ -24,44 +52,66 @@ struct ChatView: View {
                             
                             // Streaming status pill — outside LazyVStack so always visible
                             if viewModel.isStreaming {
-                                HStack(spacing: 8) {
-                                    ProgressView().scaleEffect(0.7)
-                                    Text(viewModel.streamingStatus)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack(spacing: 8) {
+                                        ProgressView().scaleEffect(0.7)
+                                        Text(viewModel.streamingStatus)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                    }
+                                    
+                                    // Show live reasoning here (NOT in the message list)
+                                    if let reasoning = viewModel.liveReasoningText, !reasoning.isEmpty {
+                                        ScrollView {
+                                            Text(reasoning)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary.opacity(0.7))
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .textSelection(.enabled)
+                                        }
+                                        .frame(maxHeight: 120)
+                                        .padding(10)
+                                        .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                                    }
                                 }
                                 .padding(.horizontal, 24)
                                 .padding(.top, 8)
                             }
                             
                             // Bottom anchor — OUTSIDE LazyVStack so always rendered
+                            // Also serves as a visibility sentinel: when on-screen, user is "near bottom"
                             Color.clear
                                 .frame(height: 1)
                                 .id("bottom-anchor")
+                                .onAppear { isUserNearBottom = true }
+                                .onDisappear { isUserNearBottom = false }
                         }
                         .padding(.vertical, 16)
                         .frame(maxWidth: .infinity)
                     }
                     .onChange(of: session.messages.count) {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        // Always scroll on new messages (user sent or assistant replied)
+                        scrollToBottom(proxy)
                     }
                     .onChange(of: viewModel.streamingStatus) {
-                        guard viewModel.isStreaming else { return }
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        guard viewModel.isStreaming, isUserNearBottom else { return }
+                        scrollToBottom(proxy)
                     }
                     .onChange(of: viewModel.isStreaming) {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        scrollToBottom(proxy)
                     }
                     .onChange(of: viewModel.scrollTick) {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        guard isUserNearBottom else { return }
+                        scrollToBottom(proxy)
                     }
                     .onAppear {
-                        proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        scrollToBottom(proxy)
                     }
                     .onChange(of: session.id) {
+                        visibleMessageCount = 20  // Reset on thread switch
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                            scrollToBottom(proxy)
                         }
                     }
                 }
@@ -135,6 +185,12 @@ struct ChatView: View {
         }
     }
     
+    /// Smooth scroll to bottom — avoids abrupt jumps.
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.15)) {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+        }
+    }
 
 }
 

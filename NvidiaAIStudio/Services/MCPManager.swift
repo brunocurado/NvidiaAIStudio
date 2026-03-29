@@ -382,6 +382,7 @@ final class MCPManager {
         if config.isEnabled { Task { await connectServer(config) } }
     }
 
+    @MainActor
     func removeServer(id: UUID) {
         connections.first { $0.id == id }?.disconnect()
         connections.removeAll { $0.id == id }
@@ -390,6 +391,7 @@ final class MCPManager {
         syncSkills()
     }
 
+    @MainActor
     func toggleServer(id: UUID, enabled: Bool) {
         if let idx = serverConfigs.firstIndex(where: { $0.id == id }) {
             serverConfigs[idx].isEnabled = enabled
@@ -410,7 +412,7 @@ final class MCPManager {
 
     func connectAll() {
         for config in serverConfigs where config.isEnabled {
-            Task { await connectServer(config) }
+            Task { @MainActor in await connectServer(config) }
         }
     }
 
@@ -420,16 +422,19 @@ final class MCPManager {
         let conn = MCPConnection(config: config)
         await MainActor.run { connections.append(conn) }
         await conn.connect()
-        syncSkills()
+        await MainActor.run { syncSkills() }
     }
 
     // MARK: - Skill sync
 
     /// Registers all discovered MCP tools into the global SkillRegistry.
+    /// MUST run on MainActor to prevent data races on SkillRegistry's dictionary.
+    @MainActor
     func syncSkills() {
         let registry = SkillRegistry.shared
         // Remove old MCP skills
-        for skill in registry.allSkills where skill.name.hasPrefix("mcp_") {
+        let mcpSkills = registry.allSkills.filter { $0.name.hasPrefix("mcp_") }
+        for skill in mcpSkills {
             registry.unregister(skill.name)
         }
         // Add current MCP skills
