@@ -497,7 +497,8 @@ struct ReasoningView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .textSelection(.enabled)
                 }
-                .frame(maxHeight: isLive ? 120 : 300)
+                // Fixed height during streaming prevents layout jumping
+                .frame(height: isLive ? 100 : min(max(CGFloat(content.count) / 4, 60), 300))
                 .padding(10)
                 .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
             }
@@ -514,17 +515,7 @@ struct ReasoningView: View {
         .onAppear {
             if isLive {
                 wasAutoExpanded = true
-                withAnimation(.spring(duration: 0.25)) {
-                    isExpanded = true
-                }
-            }
-        }
-        .onChange(of: content) {
-            // Keep expanded and scrolled to bottom while live
-            if isLive && !isExpanded {
-                withAnimation(.spring(duration: 0.25)) {
-                    isExpanded = true
-                }
+                isExpanded = true
             }
         }
     }

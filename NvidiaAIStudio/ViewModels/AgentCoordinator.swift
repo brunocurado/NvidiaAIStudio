@@ -102,10 +102,26 @@ final class AgentRunner {
                 for tc in tcs {
                     let result: String
                     do {
-                        result = try await SkillRegistry.shared.execute(
-                            name: tc.name, arguments: tc.arguments,
-                            accessLevel: accessLevel, workspacePath: workspacePath)
-                    } catch { result = "Error: \(error.localizedDescription)" }
+                        // 60-second timeout to prevent agent from getting stuck on hanging tools
+                        result = try await withThrowingTaskGroup(of: String.self) { group in
+                            group.addTask {
+                                try await SkillRegistry.shared.execute(
+                                    name: tc.name, arguments: tc.arguments,
+                                    accessLevel: accessLevel, workspacePath: workspacePath)
+                            }
+                            group.addTask {
+                                try await Task.sleep(for: .seconds(60))
+                                throw CancellationError()
+                            }
+                            let first = try await group.next()!
+                            group.cancelAll()
+                            return first
+                        }
+                    } catch is CancellationError {
+                        result = "Error: Tool execution timed out after 60 seconds"
+                    } catch {
+                        result = "Error: \(error.localizedDescription)"
+                    }
                     messages.append(Message(role: .tool, content: result, toolCallId: tc.id))
                 }
                 // Sync after tool results too

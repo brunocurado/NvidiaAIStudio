@@ -50,19 +50,6 @@ struct ChatView: View {
                                 }
                             }
                             
-                            // Streaming status pill — outside LazyVStack so always visible
-                            if viewModel.isStreaming {
-                                HStack(spacing: 8) {
-                                    ProgressView().scaleEffect(0.7)
-                                    Text(viewModel.streamingStatus)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 24)
-                                .padding(.top, 8)
-                            }
-                            
                             // Bottom anchor — OUTSIDE LazyVStack so always rendered
                             // Also serves as a visibility sentinel: when on-screen, user is "near bottom"
                             Color.clear
@@ -78,12 +65,10 @@ struct ChatView: View {
                         // Always scroll on new messages (user sent or assistant replied)
                         scrollToBottom(proxy)
                     }
-                    .onChange(of: viewModel.streamingStatus) {
-                        guard viewModel.isStreaming, isUserNearBottom else { return }
-                        scrollToBottom(proxy)
-                    }
                     .onChange(of: viewModel.isStreaming) {
-                        scrollToBottom(proxy)
+                        if viewModel.isStreaming {
+                            scrollToBottom(proxy)
+                        }
                     }
                     .onChange(of: viewModel.scrollTick) {
                         guard isUserNearBottom else { return }
@@ -98,6 +83,19 @@ struct ChatView: View {
                             scrollToBottom(proxy)
                         }
                     }
+                }
+                
+                // Streaming status — FIXED position outside ScrollView (no layout thrashing)
+                if viewModel.isStreaming {
+                    HStack(spacing: 8) {
+                        ProgressView().scaleEffect(0.7)
+                        Text(viewModel.streamingStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 6)
                 }
                 
                 // Background agents panel (floating card)
@@ -219,8 +217,7 @@ struct BackgroundAgentsPanelView: View {
     @Environment(AppState.self) private var appState
     let agents: [BackgroundAgent]
     @State private var isExpanded = true
-    @State private var selectedAgentID: UUID? = nil
-    @State private var showAgentDetail = false
+    @State private var selectedAgent: IdentifiableUUID? = nil
     
     var body: some View {
         VStack(spacing: 0) {
@@ -292,8 +289,7 @@ struct BackgroundAgentsPanelView: View {
                                         session.backgroundAgents.removeAll { $0.id == agent.id }
                                     }
                                 } else {
-                                    selectedAgentID = agent.id
-                                    showAgentDetail = true
+                                    selectedAgent = IdentifiableUUID(id: agent.id)
                                 }
                             }
                             .font(.caption)
@@ -306,11 +302,9 @@ struct BackgroundAgentsPanelView: View {
             }
         }
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
-        .sheet(isPresented: $showAgentDetail) {
-            if let id = selectedAgentID {
-                AgentDetailView(agentID: id)
-                    .environment(appState)
-            }
+        .sheet(item: $selectedAgent) { agent in
+            AgentDetailView(agentID: agent.id)
+                .environment(appState)
         }
     }
 
@@ -325,4 +319,8 @@ struct BackgroundAgentsPanelView: View {
     }
 }
 
+/// Simple wrapper to make UUID work with sheet(item:).
+struct IdentifiableUUID: Identifiable {
+    let id: UUID
+}
 

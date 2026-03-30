@@ -130,7 +130,7 @@ struct Message: Identifiable, Codable, Equatable {
                 [
                     "id": tc.id,
                     "type": "function",
-                    "function": ["name": tc.name, "arguments": tc.arguments] as [String: Any]
+                    "function": ["name": tc.name, "arguments": Self.sanitizeArguments(tc.arguments)] as [String: Any]
                 ]
             }
             if content.isEmpty { dict["content"] = NSNull() }
@@ -142,5 +142,43 @@ struct Message: Identifiable, Codable, Equatable {
         }
         
         return dict
+    }
+    
+    /// Ensures tool call arguments are valid JSON before sending to the API.
+    /// Models sometimes produce malformed JSON (single quotes, unquoted keys, trailing commas, etc).
+    private static func sanitizeArguments(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Empty or whitespace-only → valid empty object
+        guard !trimmed.isEmpty else { return "{}" }
+        
+        // Try parsing as-is — if valid JSON, return it directly
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let clean = try? JSONSerialization.data(withJSONObject: obj),
+           let result = String(data: clean, encoding: .utf8) {
+            return result
+        }
+        
+        // Common fix: single quotes → double quotes, unquoted keys
+        var fixed = trimmed
+        // Replace single-quoted strings with double-quoted
+        fixed = fixed.replacingOccurrences(of: "'", with: "\"")
+        // Remove trailing commas before } or ]
+        fixed = fixed.replacingOccurrences(of: ",\\s*}", with: "}", options: .regularExpression)
+        fixed = fixed.replacingOccurrences(of: ",\\s*]", with: "]", options: .regularExpression)
+        
+        if let data = fixed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let clean = try? JSONSerialization.data(withJSONObject: obj),
+           let result = String(data: clean, encoding: .utf8) {
+            return result
+        }
+        
+        // Last resort: wrap as a raw_input parameter so the API at least gets valid JSON
+        let escaped = trimmed
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        return "{\"raw_input\":\"\(escaped)\"}"
     }
 }
