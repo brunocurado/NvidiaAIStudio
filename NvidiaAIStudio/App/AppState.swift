@@ -6,6 +6,9 @@ final class AppState {
     // MARK: - Persistence
     private let sessionStore = SessionStore()
     
+    // MARK: - Knowledge Base
+    let knowledgeManager = KnowledgeManager()
+    
     // MARK: - Sessions
     var sessions: [Session] = []
     var activeSessionID: UUID? = nil

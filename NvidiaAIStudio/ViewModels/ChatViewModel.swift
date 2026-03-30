@@ -88,9 +88,31 @@ final class ChatViewModel {
             
             // Collect messages to send BEFORE inserting the placeholder
             let messagesToSend = await MainActor.run {
-                var msgs = [SystemPrompt.asMessage()]
+                // Build system prompt with optional Knowledge Base context
+                let lastUserMsg = appState.activeSession?.messages.last(where: { $0.role == .user })?.content ?? ""
+                let knowledgeContext = appState.knowledgeManager.buildContext(query: lastUserMsg)
+                let systemContent = SystemPrompt.defaultCoding + knowledgeContext
+                
+                var msgs = [SystemPrompt.asMessage(systemContent)]
+                
+                // If Knowledge Base has relevant PDF page images, attach them
+                let knowledgeImages = appState.knowledgeManager.buildImageAttachments(query: lastUserMsg)
+                
                 msgs += (appState.activeSession?.messages ?? [])
                     .filter { !$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil }
+                
+                // Attach knowledge images to the last user message if vision is available
+                if !knowledgeImages.isEmpty, model.supportsVision,
+                   let lastIdx = msgs.lastIndex(where: { $0.role == .user }) {
+                    msgs[lastIdx] = Message(
+                        id: msgs[lastIdx].id,
+                        role: .user,
+                        content: msgs[lastIdx].content,
+                        attachments: msgs[lastIdx].attachments + knowledgeImages,
+                        timestamp: msgs[lastIdx].timestamp
+                    )
+                }
+                
                 return self.sanitizeMessages(msgs)
             }
             

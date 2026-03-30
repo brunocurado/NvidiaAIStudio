@@ -10,6 +10,7 @@ struct SidebarView: View {
     @State private var renamingProject: String? = nil
     @State private var renameText = ""
     @State private var showUsagePanel = false
+    @State private var showKnowledgePanel = false
     @State private var renamingSession: Session? = nil
     @State private var renameSessionText = ""
     
@@ -58,6 +59,9 @@ struct SidebarView: View {
                 WorkspaceSidebarButton(onOpenPicker: openWorkspacePicker)
                 SidebarActionButton(icon: "sparkles", label: "Skills", accentColor: .purple) {
                     showSkillsPanel = true
+                }
+                SidebarActionButton(icon: "book.fill", label: "Knowledge", accentColor: .cyan) {
+                    showKnowledgePanel = true
                 }
                 SidebarActionButton(icon: "chart.bar.fill", label: "Usage", accentColor: .blue) {
                     showUsagePanel = true
@@ -138,6 +142,10 @@ struct SidebarView: View {
         .sheet(isPresented: $showSkillsPanel) { SkillsPanelView() }
         .onReceive(NotificationCenter.default.publisher(for: .openWorkspacePicker)) { _ in openWorkspacePicker() }
         .sheet(isPresented: $showUsagePanel) { UsagePanelView() }
+        .sheet(isPresented: $showKnowledgePanel) {
+            KnowledgePanelView()
+                .environment(appState)
+        }
         .alert("Rename Thread", isPresented: Binding(
             get: { renamingSession != nil },
             set: { if !$0 { renamingSession = nil } }
