@@ -239,89 +239,310 @@ struct DiffLineView: View {
 // MARK: - Terminal
 
 struct TerminalContent: View {
-    @State private var commandHistory: [TerminalLine] = [
-        TerminalLine(text: "Welcome to Nvidia AI Studio Terminal", type: .output),
-        TerminalLine(text: "Type a command and press Enter", type: .output),
-    ]
-    @State private var currentCommand = ""
-    @State private var isRunning = false
+    @State private var pty = PTYProcess()
+    @State private var outputLines: [TerminalOutputLine] = []
+    @State private var inputText = ""
+    @State private var isConnected = false
     
     var body: some View {
         VStack(spacing: 0) {
-            // Output
+            // Terminal output
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(commandHistory) { line in
-                            HStack(spacing: 4) {
-                                if line.type == .command {
-                                    Text("$")
-                                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                        .foregroundStyle(.green)
-                                }
-                                Text(line.text)
-                                    .font(.system(size: 12, design: .monospaced))
-                                    .foregroundStyle(line.type == .error ? .red : .primary)
-                                    .textSelection(.enabled)
-                            }
-                            .id(line.id)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(outputLines) { line in
+                            Text(line.attributed)
+                                .font(.system(size: 12, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(line.id)
                         }
                     }
                     .padding(12)
                 }
-                .onChange(of: commandHistory.count) {
-                    if let last = commandHistory.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
+                .onChange(of: outputLines.count) {
+                    if let last = outputLines.last {
+                        withAnimation(.easeOut(duration: 0.05)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
                     }
                 }
             }
             
             Divider().opacity(0.3)
             
-            // Command input
+            // Input line
             HStack(spacing: 8) {
-                Text("$")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.green)
+                Circle()
+                    .fill(isConnected ? .green : .red)
+                    .frame(width: 7, height: 7)
                 
-                TextField("Enter command...", text: $currentCommand)
+                TextField("Type here...", text: $inputText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13, design: .monospaced))
                     .onSubmit {
-                        runCommand()
+                        sendInput()
                     }
-                    .disabled(isRunning)
                 
-                if isRunning {
-                    ProgressView()
-                        .scaleEffect(0.6)
+                // Ctrl+C button
+                Button {
+                    pty.sendInterrupt()
+                } label: {
+                    Text("⌃C")
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
                 }
+                .buttonStyle(.plain)
+                .help("Send interrupt (Ctrl+C)")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
+        .onAppear { startPTY() }
+        .onDisappear { pty.stop() }
     }
     
-    private func runCommand() {
-        let cmd = currentCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cmd.isEmpty else { return }
-        
-        commandHistory.append(TerminalLine(text: cmd, type: .command))
-        currentCommand = ""
-        isRunning = true
-        
-        Task {
-            let result = await ShellHelper.run(cmd)
-            await MainActor.run {
-                if !result.output.isEmpty {
-                    commandHistory.append(TerminalLine(text: result.output, type: .output))
+    private func startPTY() {
+        pty.onOutput = { text in
+            let lines = text.components(separatedBy: "\n")
+            for (i, line) in lines.enumerated() {
+                if i == 0, let last = outputLines.last, !last.raw.hasSuffix("\n") {
+                    // Append to last line (partial output)
+                    let idx = outputLines.count - 1
+                    outputLines[idx] = TerminalOutputLine(raw: outputLines[idx].raw + line)
+                } else if !line.isEmpty || i < lines.count - 1 {
+                    outputLines.append(TerminalOutputLine(raw: line))
                 }
-                if !result.error.isEmpty {
-                    commandHistory.append(TerminalLine(text: result.error, type: .error))
-                }
-                isRunning = false
+            }
+            // Cap output to last 2000 lines
+            if outputLines.count > 2000 {
+                outputLines.removeFirst(outputLines.count - 1500)
             }
         }
+        pty.start()
+        isConnected = true
+    }
+    
+    private func sendInput() {
+        let text = inputText
+        inputText = ""
+        pty.write(text + "\n")
+    }
+}
+
+// MARK: - PTY Process
+
+/// A real pseudo-terminal process using forkpty().
+/// Supports interactive sessions: SSH, vim, htop, zsh, etc.
+final class PTYProcess: @unchecked Sendable {
+    private var masterFD: Int32 = -1
+    private var childPID: pid_t = 0
+    private var readThread: Thread?
+    private var isRunning = false
+    
+    var onOutput: (@MainActor (String) -> Void)?
+    
+    func start(shell: String = "/bin/zsh") {
+        guard !isRunning else { return }
+        
+        var ws = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
+        
+        childPID = forkpty(&masterFD, nil, nil, &ws)
+        
+        if childPID == 0 {
+            // Child process — exec the shell
+            setenv("TERM", "xterm-256color", 1)
+            setenv("LANG", "en_US.UTF-8", 1)
+            setenv("LC_ALL", "en_US.UTF-8", 1)
+            let homeDir = NSHomeDirectory()
+            setenv("HOME", homeDir, 1)
+            _ = chdir(homeDir)
+            // Use execv with null-terminated argv array
+            let args: [UnsafeMutablePointer<CChar>?] = [
+                strdup(shell),
+                strdup("--login"),
+                nil
+            ]
+            execv(shell, args)
+            _exit(1)
+        }
+        
+        guard childPID > 0 else {
+            print("[PTYProcess] forkpty failed")
+            return
+        }
+        
+        isRunning = true
+        startReading()
+    }
+    
+    func stop() {
+        guard isRunning else { return }
+        isRunning = false
+        if masterFD >= 0 {
+            close(masterFD)
+            masterFD = -1
+        }
+        if childPID > 0 {
+            kill(childPID, SIGTERM)
+            childPID = 0
+        }
+    }
+    
+    func write(_ text: String) {
+        guard masterFD >= 0 else { return }
+        text.withCString { ptr in
+            let len = strlen(ptr)
+            _ = Darwin.write(masterFD, ptr, len)
+        }
+    }
+    
+    func sendInterrupt() {
+        // Send Ctrl+C (ETX character)
+        write("\u{03}")
+    }
+    
+    func resize(rows: Int, cols: Int) {
+        guard masterFD >= 0 else { return }
+        var ws = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
+        _ = ioctl(masterFD, TIOCSWINSZ, &ws)
+    }
+    
+    private func startReading() {
+        let fd = masterFD
+        let thread = Thread {
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while self.isRunning && fd >= 0 {
+                let bytesRead = read(fd, &buffer, buffer.count)
+                if bytesRead <= 0 { break }
+                if let str = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
+                    let output = str
+                    Task { @MainActor in
+                        self.onOutput?(output)
+                    }
+                }
+            }
+        }
+        thread.qualityOfService = .userInteractive
+        thread.name = "PTYReader"
+        thread.start()
+        readThread = thread
+    }
+    
+    deinit {
+        stop()
+    }
+}
+
+// MARK: - ANSI Parser + Terminal Line
+
+struct TerminalOutputLine: Identifiable {
+    let id = UUID()
+    let raw: String
+    
+    /// Parse ANSI escape codes into a colored AttributedString.
+    var attributed: AttributedString {
+        ANSIParser.parse(raw)
+    }
+}
+
+/// Parses ANSI escape sequences into styled AttributedString.
+enum ANSIParser {
+    // Regex to match ANSI escape sequences: ESC[ ... m
+    private static let ansiPattern = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*m", options: [])
+    // Also strip other escape sequences (cursor movement, etc.)
+    private static let otherEscapes = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*[A-HJKSTfn]|\\x1B\\].*?\\x07|\\x1B\\(B", options: [])
+    
+    static func parse(_ raw: String) -> AttributedString {
+        let clean = otherEscapes.stringByReplacingMatches(
+            in: raw, range: NSRange(raw.startIndex..., in: raw), withTemplate: ""
+        )
+        
+        var result = AttributedString()
+        var currentColor: Color = .primary
+        var isBold = false
+        var isDim = false
+        
+        let nsString = clean as NSString
+        let matches = ansiPattern.matches(in: clean, range: NSRange(location: 0, length: nsString.length))
+        
+        var lastEnd = 0
+        
+        for match in matches {
+            // Text before this escape sequence
+            if match.range.location > lastEnd {
+                let textRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
+                let text = nsString.substring(with: textRange)
+                var attr = AttributedString(text)
+                attr.foregroundColor = isDim ? currentColor.opacity(0.6) : currentColor
+                if isBold { attr.font = .system(size: 12, weight: .bold, design: .monospaced) }
+                result += attr
+            }
+            
+            // Parse the escape code
+            let code = nsString.substring(with: match.range)
+            let numbers = code.dropFirst(2).dropLast()
+                .split(separator: ";")
+                .compactMap { Int($0) }
+            
+            for num in (numbers.isEmpty ? [0] : numbers) {
+                switch num {
+                case 0:  currentColor = .primary; isBold = false; isDim = false
+                case 1:  isBold = true
+                case 2:  isDim = true
+                case 22: isBold = false; isDim = false
+                case 30: currentColor = Color(.darkGray)
+                case 31: currentColor = Color(.systemRed)
+                case 32: currentColor = Color(.systemGreen)
+                case 33: currentColor = Color(.systemYellow)
+                case 34: currentColor = Color(.systemBlue)
+                case 35: currentColor = Color(.systemPurple)
+                case 36: currentColor = Color(.systemTeal)
+                case 37: currentColor = .white
+                case 39: currentColor = .primary
+                case 90: currentColor = .gray
+                case 91: currentColor = Color(.systemRed).opacity(0.8)
+                case 92: currentColor = Color(.systemGreen).opacity(0.8)
+                case 93: currentColor = Color(.systemYellow).opacity(0.8)
+                case 94: currentColor = Color(.systemBlue).opacity(0.8)
+                case 95: currentColor = Color(.systemPurple).opacity(0.8)
+                case 96: currentColor = Color(.systemTeal).opacity(0.8)
+                case 97: currentColor = .white
+                default: break
+                }
+            }
+            
+            lastEnd = match.range.location + match.range.length
+        }
+        
+        // Remaining text after last escape
+        if lastEnd < nsString.length {
+            let text = nsString.substring(from: lastEnd)
+            var attr = AttributedString(text)
+            attr.foregroundColor = isDim ? currentColor.opacity(0.6) : currentColor
+            if isBold { attr.font = .system(size: 12, weight: .bold, design: .monospaced) }
+            result += attr
+        }
+        
+        // If no escapes found, just return plain text
+        if matches.isEmpty && result.characters.isEmpty {
+            result = AttributedString(clean)
+        }
+        
+        return result
+    }
+}
+
+struct TerminalLine: Identifiable {
+    let id = UUID()
+    let text: String
+    let type: LineType
+    
+    enum LineType {
+        case command, output, error
     }
 }
 
@@ -370,16 +591,6 @@ struct DiffLine: Identifiable {
     
     enum LineType {
         case addition, deletion, context, header
-    }
-}
-
-struct TerminalLine: Identifiable {
-    let id = UUID()
-    let text: String
-    let type: LineType
-    
-    enum LineType {
-        case command, output, error
     }
 }
 

@@ -7,6 +7,8 @@ import AppKit
 final class KnowledgeManager {
     
     var files: [KnowledgeFile] = []
+    var collections: [KnowledgeCollection] = []
+    var activeCollectionID: UUID? = nil    // nil = Default collection
     var isDigesting = false
     var digestProgress: (current: Int, total: Int) = (0, 0)
     
@@ -21,6 +23,7 @@ final class KnowledgeManager {
     }()
     
     private var metadataURL: URL { storageURL.appendingPathComponent("metadata.json") }
+    private var collectionsURL: URL { storageURL.appendingPathComponent("collections.json") }
     private var pagesDir: URL {
         let dir = storageURL.appendingPathComponent("pages", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -29,6 +32,57 @@ final class KnowledgeManager {
     
     init() {
         loadMetadata()
+    }
+    
+    // MARK: - Active Collection
+    
+    /// The currently active collection (Default if none selected).
+    var activeCollection: KnowledgeCollection {
+        collections.first { $0.id == activeCollectionID } ?? .default
+    }
+    
+    /// All collections including Default.
+    var allCollections: [KnowledgeCollection] {
+        [.default] + collections
+    }
+    
+    /// Files belonging to the active collection.
+    var activeFiles: [KnowledgeFile] {
+        files.filter { ($0.collectionID ?? KnowledgeCollection.default.id) == (activeCollectionID ?? KnowledgeCollection.default.id) }
+    }
+    
+    // MARK: - Collection Management
+    
+    @MainActor
+    func createCollection(name: String, icon: String = "folder.fill") -> KnowledgeCollection {
+        let collection = KnowledgeCollection(name: name, icon: icon)
+        collections.append(collection)
+        activeCollectionID = collection.id
+        saveMetadata()
+        return collection
+    }
+    
+    @MainActor
+    func renameCollection(id: UUID, name: String) {
+        if let idx = collections.firstIndex(where: { $0.id == id }) {
+            collections[idx].name = name
+            saveMetadata()
+        }
+    }
+    
+    @MainActor
+    func deleteCollection(id: UUID) {
+        // Remove all files in this collection
+        let fileIDs = files.filter { $0.collectionID == id }.map(\.id)
+        for fid in fileIDs { removeFile(id: fid) }
+        collections.removeAll { $0.id == id }
+        if activeCollectionID == id { activeCollectionID = nil }
+        saveMetadata()
+    }
+    
+    @MainActor
+    func switchCollection(id: UUID?) {
+        activeCollectionID = id
     }
     
     // MARK: - File Management
@@ -45,6 +99,7 @@ final class KnowledgeManager {
             
             let mimeType = Self.mimeType(for: url)
             var file = KnowledgeFile(
+                collectionID: activeCollectionID,
                 filename: url.lastPathComponent,
                 originalPath: url.path,
                 mimeType: mimeType
@@ -231,7 +286,7 @@ final class KnowledgeManager {
     
     /// Build context string from digests for injection into the system prompt.
     func buildContext(query: String) -> String {
-        let enabledFiles = files.filter { $0.isEnabled && $0.digestStatus == .completed }
+        let enabledFiles = activeFiles.filter { $0.isEnabled && $0.digestStatus == .completed }
         guard !enabledFiles.isEmpty else { return "" }
         
         var context = "\n\n## Knowledge Base Context\nThe user has a knowledge base with the following documents. Use this context to answer their questions accurately.\n\n"
@@ -274,7 +329,7 @@ final class KnowledgeManager {
     
     /// Build image attachments for pages relevant to the query.
     func buildImageAttachments(query: String, maxImages: Int = 5) -> [Message.Attachment] {
-        let enabledFiles = files.filter { $0.isEnabled && $0.mimeType.contains("pdf") }
+        let enabledFiles = activeFiles.filter { $0.isEnabled && $0.mimeType.contains("pdf") }
         guard !enabledFiles.isEmpty else { return [] }
         
         let queryWords = Set(query.lowercased().split(separator: " ").filter { $0.count > 3 }.map(String.init))
@@ -438,15 +493,23 @@ final class KnowledgeManager {
     // MARK: - Persistence
     
     private func saveMetadata() {
-        guard let data = try? JSONEncoder().encode(files) else { return }
-        try? data.write(to: metadataURL)
+        if let data = try? JSONEncoder().encode(files) {
+            try? data.write(to: metadataURL)
+        }
+        if let data = try? JSONEncoder().encode(collections) {
+            try? data.write(to: collectionsURL)
+        }
     }
     
     private func loadMetadata() {
-        guard let data = try? Data(contentsOf: metadataURL),
-              let loaded = try? JSONDecoder().decode([KnowledgeFile].self, from: data)
-        else { return }
-        files = loaded
+        if let data = try? Data(contentsOf: metadataURL),
+           let loaded = try? JSONDecoder().decode([KnowledgeFile].self, from: data) {
+            files = loaded
+        }
+        if let data = try? Data(contentsOf: collectionsURL),
+           let loaded = try? JSONDecoder().decode([KnowledgeCollection].self, from: data) {
+            collections = loaded
+        }
     }
     
     // MARK: - MIME Type Detection
@@ -483,9 +546,10 @@ final class KnowledgeManager {
     
     // MARK: - Stats
     
-    var totalCharacters: Int { files.filter(\.isEnabled).reduce(0) { $0 + $1.totalCharacters } }
-    var totalDigestCharacters: Int { files.filter { $0.isEnabled && $0.digestStatus == .completed }.reduce(0) { $0 + $1.digest.count } }
+    var totalCharacters: Int { activeFiles.filter(\.isEnabled).reduce(0) { $0 + $1.totalCharacters } }
+    var totalDigestCharacters: Int { activeFiles.filter { $0.isEnabled && $0.digestStatus == .completed }.reduce(0) { $0 + $1.digest.count } }
     var estimatedTokens: Int { totalDigestCharacters / 4 }
-    var pendingCount: Int { files.filter { $0.digestStatus == .pending || $0.digestStatus == .failed }.count }
-    var completedCount: Int { files.filter { $0.digestStatus == .completed }.count }
+    var pendingCount: Int { activeFiles.filter { $0.digestStatus == .pending || $0.digestStatus == .failed }.count }
+    var completedCount: Int { activeFiles.filter { $0.digestStatus == .completed }.count }
+    var activeFileCount: Int { activeFiles.count }
 }

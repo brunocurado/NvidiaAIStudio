@@ -9,6 +9,11 @@ struct KnowledgePanelView: View {
     @State private var showFilePicker = false
     @State private var isDigesting = false
     @State private var showClearConfirm = false
+    @State private var showNewCollection = false
+    @State private var newCollectionName = ""
+    @State private var showDeleteCollection = false
+    @State private var renamingCollection = false
+    @State private var renameText = ""
     
     private var km: KnowledgeManager { appState.knowledgeManager }
     
@@ -19,7 +24,12 @@ struct KnowledgePanelView: View {
             
             Divider().opacity(0.3)
             
-            if km.files.isEmpty {
+            // Collection picker
+            collectionPicker
+            
+            Divider().opacity(0.2)
+            
+            if km.activeFiles.isEmpty {
                 emptyState
             } else {
                 // Stats bar
@@ -30,7 +40,7 @@ struct KnowledgePanelView: View {
                 // File list
                 ScrollView {
                     LazyVStack(spacing: 6) {
-                        ForEach(km.files) { file in
+                        ForEach(km.activeFiles) { file in
                             FileRowView(file: file, onToggle: {
                                 km.toggleFile(id: file.id)
                             }, onDelete: {
@@ -81,7 +91,39 @@ struct KnowledgePanelView: View {
             Button("Clear All", role: .destructive) { km.clearAll() }
             Button("Cancel", role: .cancel) { }
         } message: {
-            Text("This will remove all \(km.files.count) documents and their AI summaries. This cannot be undone.")
+            Text("This will remove all \(km.activeFileCount) documents from \"\(km.activeCollection.name)\" and their AI summaries. This cannot be undone.")
+        }
+        .alert("New Collection", isPresented: $showNewCollection) {
+            TextField("Collection name", text: $newCollectionName)
+            Button("Create") {
+                if !newCollectionName.trimmingCharacters(in: .whitespaces).isEmpty {
+                    let _ = km.createCollection(name: newCollectionName.trimmingCharacters(in: .whitespaces))
+                }
+                newCollectionName = ""
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { newCollectionName = "" }
+        }
+        .alert("Rename Collection", isPresented: $renamingCollection) {
+            TextField("New name", text: $renameText)
+            Button("Rename") {
+                if !renameText.trimmingCharacters(in: .whitespaces).isEmpty,
+                   let id = km.activeCollectionID {
+                    km.renameCollection(id: id, name: renameText.trimmingCharacters(in: .whitespaces))
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+            Button("Cancel", role: .cancel) { }
+        }
+        .alert("Delete \"\(km.activeCollection.name)\"?", isPresented: $showDeleteCollection) {
+            Button("Delete", role: .destructive) {
+                if let id = km.activeCollectionID {
+                    km.deleteCollection(id: id)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will delete the collection and all its files. This cannot be undone.")
         }
     }
     
@@ -107,6 +149,72 @@ struct KnowledgePanelView: View {
                 .keyboardShortcut(.cancelAction)
         }
         .padding(16)
+    }
+    
+    // MARK: - Collection Picker
+    
+    private var collectionPicker: some View {
+        HStack(spacing: 8) {
+            Image(systemName: km.activeCollection.icon)
+                .font(.system(size: 12))
+                .foregroundStyle(.cyan)
+            
+            Menu {
+                ForEach(km.allCollections) { collection in
+                    Button {
+                        km.switchCollection(id: collection.id == KnowledgeCollection.default.id ? nil : collection.id)
+                    } label: {
+                        HStack {
+                            Image(systemName: collection.icon)
+                            Text(collection.name)
+                            let count = km.files.filter { ($0.collectionID ?? KnowledgeCollection.default.id) == collection.id }.count
+                            Text("(\(count))")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                
+                Divider()
+                
+                Button {
+                    showNewCollection = true
+                } label: {
+                    Label("New Collection", systemImage: "plus.circle")
+                }
+                
+                if km.activeCollectionID != nil {
+                    Divider()
+                    Button {
+                        renameText = km.activeCollection.name
+                        renamingCollection = true
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    Button(role: .destructive) {
+                        showDeleteCollection = true
+                    } label: {
+                        Label("Delete Collection", systemImage: "trash")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(km.activeCollection.name)
+                        .font(.system(size: 13, weight: .semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+            
+            Text("\(km.activeFileCount) files")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
     
     // MARK: - Empty State
@@ -183,11 +291,11 @@ struct KnowledgePanelView: View {
     
     private var statsBar: some View {
         HStack(spacing: 16) {
-            statPill(icon: "doc.fill", value: "\(km.files.count)", label: "files")
+            statPill(icon: "doc.fill", value: "\(km.activeFileCount)", label: "files")
             statPill(icon: "checkmark.circle.fill",
-                     value: "\(km.completedCount)/\(km.files.count)",
+                     value: "\(km.completedCount)/\(km.activeFileCount)",
                      label: "digested",
-                     color: km.completedCount == km.files.count ? .green : .orange)
+                     color: km.completedCount == km.activeFileCount ? .green : .orange)
             statPill(icon: "text.word.spacing", value: "~\(formatTokens(km.estimatedTokens))", label: "tokens")
             
             Spacer()
@@ -244,7 +352,7 @@ struct KnowledgePanelView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyan)
-            } else if !km.files.isEmpty {
+            } else if !km.activeFiles.isEmpty {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(.green)
@@ -256,7 +364,7 @@ struct KnowledgePanelView: View {
             
             Spacer()
             
-            if !km.files.isEmpty {
+            if !km.activeFiles.isEmpty {
                 Button(role: .destructive) {
                     showClearConfirm = true
                 } label: {

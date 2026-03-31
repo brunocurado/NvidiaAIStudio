@@ -224,7 +224,7 @@ enum SkillArgs {
         guard let contentKeyRange = raw.range(of: "\"content\"\\s*:\\s*\"", options: .regularExpression) else {
             return nil
         }
-        var contentStart = contentKeyRange.upperBound
+        let contentStart = contentKeyRange.upperBound
         // Skip past the opening quote
         if contentStart < raw.endIndex {
             var content = String(raw[contentStart...])

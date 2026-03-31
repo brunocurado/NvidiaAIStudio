@@ -1,8 +1,27 @@
 import Foundation
 
+/// A named collection of knowledge files (e.g., "Holidu", "Client X").
+struct KnowledgeCollection: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    let createdAt: Date
+    var icon: String
+    
+    init(id: UUID = UUID(), name: String, createdAt: Date = Date(), icon: String = "folder.fill") {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+        self.icon = icon
+    }
+    
+    /// The built-in default collection.
+    static let `default` = KnowledgeCollection(id: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!, name: "Default", icon: "tray.fill")
+}
+
 /// A file added to the Knowledge Base for RAG-style context injection.
 struct KnowledgeFile: Identifiable, Codable, Equatable {
     let id: UUID
+    var collectionID: UUID?              // nil → belongs to Default collection
     let filename: String
     let originalPath: String
     let addedAt: Date
@@ -16,6 +35,7 @@ struct KnowledgeFile: Identifiable, Codable, Equatable {
     
     init(
         id: UUID = UUID(),
+        collectionID: UUID? = nil,
         filename: String,
         originalPath: String,
         addedAt: Date = Date(),
@@ -28,6 +48,7 @@ struct KnowledgeFile: Identifiable, Codable, Equatable {
         chunks: [TextChunk] = []
     ) {
         self.id = id
+        self.collectionID = collectionID
         self.filename = filename
         self.originalPath = originalPath
         self.addedAt = addedAt
