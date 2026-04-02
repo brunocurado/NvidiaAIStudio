@@ -322,14 +322,17 @@ struct InputAreaView: View {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
         
-        // If streaming, send as an interrupt instead of a new request
+        // If streaming, cancel the ongoing stream and immediately send the new message
         if viewModel.isStreaming {
-            viewModel.pendingUserInterrupt = text
-            inputText = ""
-            // Show the user's message immediately in the chat
-            appState.mutateActiveSession { session in
-                session.messages.append(Message(role: .user, content: text))
-                session.updatedAt = Date()
+            viewModel.stopStreaming()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                let interruptAttachments = pendingAttachments
+                self.inputText = ""
+                self.pendingAttachments = []
+                self.editorHeight = 22
+                Task {
+                    await viewModel.sendMessage(text, attachments: interruptAttachments, appState: appState)
+                }
             }
             return
         }

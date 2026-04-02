@@ -8,7 +8,6 @@ final class ChatViewModel {
     var estimatedTokenCount: Int = 0
     var maxTokens: Int = 200_000
     var scrollTick: UInt = 0  // Increments periodically during streaming to trigger scroll
-    @MainActor var pendingUserInterrupt: String? = nil
     
     private var streamTask: Task<Void, Never>?
     private let skillRegistry = SkillRegistry.shared
@@ -70,19 +69,6 @@ final class ChatViewModel {
         
         for _ in 0..<maxIterations {
             if Task.isCancelled { break }
-            
-            // Check for user interrupt before starting next iteration
-            if let interrupt = await MainActor.run(body: { self.pendingUserInterrupt }) {
-                await MainActor.run {
-                    self.pendingUserInterrupt = nil
-                    appState.mutateActiveSession { session in
-                        session.messages.append(Message(role: .user, content: interrupt))
-                        session.updatedAt = Date()
-                    }
-                    self.streamingStatus = "Reading your message..."
-                }
-                try? await Task.sleep(for: .milliseconds(300))
-            }
             
             let streamingID = UUID()
             
@@ -160,6 +146,17 @@ final class ChatViewModel {
                             self.lastScrollTime = now
                         }
                     }
+                }
+                
+                // If stream was cancelled by user interrupt, clean up the placeholder and abort entirely
+                if Task.isCancelled {
+                    await MainActor.run {
+                        self.isStreaming = false
+                        appState.mutateActiveSession { session in
+                            session.messages.removeAll(where: { $0.id == streamingID })
+                        }
+                    }
+                    return
                 }
                 
                 // Finalize: mark message as no longer streaming
@@ -258,6 +255,22 @@ final class ChatViewModel {
                 }
                 return
                 
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.isStreaming = false
+                    appState.mutateActiveSession { session in
+                        session.messages.removeAll(where: { $0.id == streamingID })
+                    }
+                }
+                return
+            } catch let error as NSError where error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled {
+                await MainActor.run {
+                    self.isStreaming = false
+                    appState.mutateActiveSession { session in
+                        session.messages.removeAll(where: { $0.id == streamingID })
+                    }
+                }
+                return
             } catch {
                 let errContent = accContent
                 let errReasoning = accReasoning
