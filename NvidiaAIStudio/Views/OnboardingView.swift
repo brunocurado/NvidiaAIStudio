@@ -129,7 +129,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
 
             VStack(spacing: 10) {
-                ForEach([Provider.nvidia, .anthropic, .openai], id: \.self) { p in
+                ForEach([Provider.nvidia, .anthropic, .openai, .openRouter], id: \.self) { p in
                     ProviderRow(
                         provider: p,
                         isSelected: selectedProvider == p,
@@ -178,6 +178,13 @@ struct OnboardingView: View {
                         .padding(.top, 4)
                 case .custom:
                     instructionRow("1", "Enter your custom API key below")
+                case .openRouter:
+                    instructionRow("1", "Go to openrouter.ai")
+                    instructionRow("2", "Sign in and navigate to Keys")
+                    instructionRow("3", "Create a key starting with sk-or-")
+                    Link("Open OpenRouter →", destination: URL(string: "https://openrouter.ai/keys")!)
+                        .font(.caption)
+                        .padding(.top, 4)
                 }
             }
             .padding(12)
@@ -362,10 +369,11 @@ private struct ProviderRow: View {
 
     private var providerDescription: String {
         switch provider {
-        case .nvidia:    return "Free tier available · DeepSeek, Kimi, Qwen, Llama"
-        case .anthropic: return "Claude Opus, Sonnet, Haiku · Best reasoning"
-        case .openai:    return "GPT-4o, o3, GPT-4.1 · Most popular"
-        case .custom:    return "Any OpenAI-compatible API"
+        case .nvidia:      return "Free tier available · DeepSeek, Kimi, Qwen, Llama"
+        case .anthropic:   return "Claude Opus, Sonnet, Haiku · Best reasoning"
+        case .openai:      return "GPT-4o, o3, GPT-4.1 · Most popular"
+        case .openRouter:  return "Unified gateway · 200+ models from all providers"
+        case .custom:      return "Any OpenAI-compatible API"
         }
     }
 }

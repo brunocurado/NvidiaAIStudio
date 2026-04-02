@@ -10,10 +10,12 @@ final class OpenAIAPIService: AIProvider {
     private let apiKey: String
     private let baseURL: String
     private let session: URLSession
+    private let extraHeaders: [String: String]
 
-    init(apiKey: String, baseURL: String = "https://api.openai.com/v1") {
+    init(apiKey: String, baseURL: String = "https://api.openai.com/v1", extraHeaders: [String: String] = [:]) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.extraHeaders = extraHeaders
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 3600
@@ -93,6 +95,9 @@ final class OpenAIAPIService: AIProvider {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (key, value) in extraHeaders {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
 
         var body: [String: Any] = [
             "model": model.id,

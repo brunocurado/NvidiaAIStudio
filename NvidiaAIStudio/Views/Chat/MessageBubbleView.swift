@@ -2,10 +2,18 @@ import SwiftUI
 import MarkdownUI
 
 /// A single message bubble in the chat.
-/// A single message bubble in the chat.
-struct MessageBubbleView: View {
+struct MessageBubbleView: View, Equatable {
     let message: Message
     @State private var showToolDetail = false
+    
+    static func == (lhs: MessageBubbleView, rhs: MessageBubbleView) -> Bool {
+        lhs.message.id == rhs.message.id &&
+        lhs.message.content == rhs.message.content &&
+        lhs.message.isStreaming == rhs.message.isStreaming &&
+        lhs.message.reasoning == rhs.message.reasoning &&
+        lhs.message.toolCalls?.count == rhs.message.toolCalls?.count &&
+        lhs.message.statusBadges.count == rhs.message.statusBadges.count
+    }
     
     var body: some View {
         HStack(alignment: .top, spacing: 12) {

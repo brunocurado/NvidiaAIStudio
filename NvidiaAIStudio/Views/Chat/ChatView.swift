@@ -42,20 +42,17 @@ struct ChatView: View {
                                 .padding(.bottom, 8)
                             }
                             
-                            // VStack for the end of the conversation.
-                            // We use a regular VStack for the last N visible messages because LazyVStack
-                            // inside ScrollView on macOS is notoriously buggy with rapid array mutations,
-                            // causing identity loss and blank screen flashes.
-                            VStack(spacing: 16) {
+                            // LazyVStack: only renders on-screen messages.
+                            // The old VStack caused O(N) Markdown re-parses per frame → 99% CPU.
+                            LazyVStack(spacing: 16) {
                                 let messages = session.messages
                                 let startIdx = max(0, messages.count - visibleMessageCount)
-                                // Standard array slice iteration prevents the .suffix() identity loss bug
                                 ForEach(messages[startIdx..<messages.count], id: \.id) { message in
                                     MessageBubbleView(message: message)
+                                        .equatable()
                                 }
                             }
-                            // Important: Disable standard transition to avoid flash on content updates
-                            .animation(.none, value: session.messages)
+                            .animation(.none, value: session.messages.count)
                             
                             // Bottom anchor — OUTSIDE LazyVStack so always rendered
                             // Also serves as a visibility sentinel: when on-screen, user is "near bottom"

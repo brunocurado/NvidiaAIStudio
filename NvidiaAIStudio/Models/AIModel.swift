@@ -47,6 +47,20 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
         AIModel(id: "gpt-4.1-mini",    name: "🟢 GPT-4.1 Mini — Efficient",        provider: .openai, contextWindow: 1_000_000, supportsThinking: false, supportsVision: true),
     ]
 
+    /// Curated models for OpenRouter — covers the most popular models available via their unified API.
+    static let openRouterModels: [AIModel] = [
+        AIModel(id: "openai/gpt-5.2",                  name: "🌐 GPT-5.2 — OpenAI Flagship",               provider: .openRouter, contextWindow: 200_000, supportsVision: true),
+        AIModel(id: "anthropic/claude-sonnet-4",        name: "🌐 Claude Sonnet 4 — via OpenRouter",        provider: .openRouter, contextWindow: 200_000, supportsThinking: true, supportsVision: true),
+        AIModel(id: "anthropic/claude-haiku-4",         name: "🌐 Claude Haiku 4 — Fast via OpenRouter",    provider: .openRouter, contextWindow: 200_000, supportsVision: true),
+        AIModel(id: "google/gemini-2.5-pro-preview",    name: "🌐 Gemini 2.5 Pro — Google via OpenRouter",  provider: .openRouter, contextWindow: 1_000_000, supportsThinking: true, supportsVision: true),
+        AIModel(id: "google/gemini-2.5-flash-preview",  name: "🌐 Gemini 2.5 Flash — Fast Google",          provider: .openRouter, contextWindow: 1_000_000, supportsVision: true),
+        AIModel(id: "deepseek/deepseek-chat-v3-0324",   name: "🌐 DeepSeek V3 — via OpenRouter",           provider: .openRouter, contextWindow: 128_000, supportsThinking: true),
+        AIModel(id: "deepseek/deepseek-r1",             name: "🌐 DeepSeek R1 — Reasoning",                provider: .openRouter, contextWindow: 128_000, supportsThinking: true),
+        AIModel(id: "meta-llama/llama-4-maverick",      name: "🌐 Llama 4 Maverick — Meta",                provider: .openRouter, contextWindow: 1_000_000, supportsVision: true),
+        AIModel(id: "qwen/qwen3-235b-a22b",            name: "🌐 Qwen3 235B — Large MoE",                 provider: .openRouter, contextWindow: 131_072, supportsThinking: true),
+        AIModel(id: "mistralai/mistral-medium-3",       name: "🌐 Mistral Medium 3 — European",            provider: .openRouter, contextWindow: 131_072),
+    ]
+
     /// Curated default models matching the Python `models.py` list.
     static let defaultModels: [AIModel] = [
         // ── Flagship / Daily Drivers ──

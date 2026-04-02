@@ -54,10 +54,11 @@ final class AppState {
 
     var modelsForActiveProvider: [AIModel] {
         switch activeProvider {
-        case .nvidia:    return availableModels.filter { $0.provider == .nvidia }
-        case .anthropic: return AIModel.anthropicModels
-        case .openai:    return AIModel.openAIModels
-        case .custom:    return availableModels.filter { $0.provider == .custom }
+        case .nvidia:      return availableModels.filter { $0.provider == .nvidia }
+        case .anthropic:   return AIModel.anthropicModels
+        case .openai:      return AIModel.openAIModels
+        case .openRouter:  return AIModel.openRouterModels
+        case .custom:      return availableModels.filter { $0.provider == .custom }
         }
     }
 
@@ -68,9 +69,10 @@ final class AppState {
         }
         let toMerge: [AIModel]
         switch newProvider {
-        case .anthropic: toMerge = AIModel.anthropicModels
-        case .openai:    toMerge = AIModel.openAIModels
-        default:         toMerge = []
+        case .anthropic:   toMerge = AIModel.anthropicModels
+        case .openai:      toMerge = AIModel.openAIModels
+        case .openRouter:  toMerge = AIModel.openRouterModels
+        default:           toMerge = []
         }
         for model in toMerge {
             if !availableModels.contains(where: { $0.id == model.id }) {

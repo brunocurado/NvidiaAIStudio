@@ -15,6 +15,12 @@ enum ProviderServiceFactory {
         case .openai:
             let url = customBaseURL ?? Provider.openai.baseURL
             return OpenAIAPIService(apiKey: apiKey, baseURL: url)
+        case .openRouter:
+            let url = customBaseURL ?? Provider.openRouter.baseURL
+            return OpenAIAPIService(apiKey: apiKey, baseURL: url, extraHeaders: [
+                "HTTP-Referer": "https://github.com/brunocurado/NvidiaAIStudio",
+                "X-OpenRouter-Title": "Nvidia AI Studio"
+            ])
         case .custom:
             // Custom providers: try OpenAI-compatible format first
             let url = customBaseURL ?? ""

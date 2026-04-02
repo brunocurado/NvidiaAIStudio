@@ -5,6 +5,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
     case nvidia = "NVIDIA NIM"
     case anthropic = "Anthropic"
     case openai = "OpenAI"
+    case openRouter = "OpenRouter"
     case custom = "Custom"
     
     var id: String { rawValue }
@@ -14,6 +15,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .nvidia: return "https://integrate.api.nvidia.com/v1"
         case .anthropic: return "https://api.anthropic.com/v1"
         case .openai: return "https://api.openai.com/v1"
+        case .openRouter: return "https://openrouter.ai/api/v1"
         case .custom: return ""
         }
     }
@@ -23,6 +25,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .nvidia: return "cpu.fill"
         case .anthropic: return "brain.fill"
         case .openai: return "sparkles"
+        case .openRouter: return "globe.americas.fill"
         case .custom: return "server.rack"
         }
     }
@@ -32,6 +35,7 @@ enum Provider: String, Codable, CaseIterable, Identifiable {
         case .nvidia: return "nvidia-green"
         case .anthropic: return "anthropic-orange"
         case .openai: return "openai-teal"
+        case .openRouter: return "openrouter-purple"
         case .custom: return "custom-purple"
         }
     }
