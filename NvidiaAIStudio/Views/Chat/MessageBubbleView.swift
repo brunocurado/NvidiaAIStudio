@@ -61,6 +61,7 @@ struct MessageBubbleView: View {
                                 .textSelection(.enabled)
                         }
                     }
+                    .textSelection(.enabled)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .glassEffect(

@@ -243,6 +243,8 @@ struct TerminalContent: View {
     @State private var outputLines: [TerminalOutputLine] = []
     @State private var inputText = ""
     @State private var isConnected = false
+    @State private var commandHistory: [String] = []
+    @State private var historyIndex = -1
     
     var body: some View {
         VStack(spacing: 0) {
@@ -277,12 +279,31 @@ struct TerminalContent: View {
                     .fill(isConnected ? .green : .red)
                     .frame(width: 7, height: 7)
                 
-                TextField("Type here...", text: $inputText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
-                    .onSubmit {
+                TerminalInputArea(
+                    text: $inputText,
+                    onCommit: {
                         sendInput()
+                    },
+                    onUp: {
+                        if !commandHistory.isEmpty {
+                            historyIndex = min(historyIndex + 1, commandHistory.count - 1)
+                            inputText = commandHistory[commandHistory.count - 1 - historyIndex]
+                        }
+                    },
+                    onDown: {
+                        if historyIndex > 0 {
+                            historyIndex -= 1
+                            inputText = commandHistory[commandHistory.count - 1 - historyIndex]
+                        } else {
+                            historyIndex = -1
+                            inputText = ""
+                        }
+                    },
+                    onTab: {
+                        doAutocomplete()
                     }
+                )
+                .frame(height: 20)
                 
                 // Ctrl+C button
                 Button {
@@ -307,6 +328,11 @@ struct TerminalContent: View {
     
     private func startPTY() {
         pty.onOutput = { text in
+            // Handle native clear screen requests
+            if text.contains("\u{1b}[2J") || text.contains("\u{1b}c") {
+                outputLines.removeAll()
+            }
+            
             let lines = text.components(separatedBy: "\n")
             for (i, line) in lines.enumerated() {
                 if i == 0, let last = outputLines.last, !last.raw.hasSuffix("\n") {
@@ -326,8 +352,49 @@ struct TerminalContent: View {
         isConnected = true
     }
     
+    private func doAutocomplete() {
+        let text = inputText.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        
+        Task {
+            let components = text.split(separator: " ", omittingEmptySubsequences: false)
+            let isCommand = components.count == 1
+            let lastWord = String(components.last ?? "")
+            
+            // compgen -c for commands, compgen -f for files
+            let flag = isCommand ? "-c" : "-f"
+            let escapedWord = lastWord.replacingOccurrences(of: "\"", with: "\\\"")
+            // We use bash -c because compgen is a bash builtin
+            let script = "bash -c 'compgen \(flag) \"\(escapedWord)\"'"
+            let result = await ShellHelper.run(script)
+            
+            let matches = result.output.components(separatedBy: "\n").filter { !$0.isEmpty }
+            if let bestMatch = matches.first {
+                await MainActor.run {
+                    if isCommand {
+                        inputText = bestMatch
+                    } else {
+                        // Replace last word with completion
+                        let prefix = components.dropLast().joined(separator: " ")
+                        inputText = prefix + (prefix.isEmpty ? "" : " ") + bestMatch
+                    }
+                }
+            }
+        }
+    }
+    
     private func sendInput() {
         let text = inputText
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if commandHistory.last != text {
+                commandHistory.append(text)
+            }
+            // Keep history sane
+            if commandHistory.count > 100 {
+                commandHistory.removeFirst(commandHistory.count - 100)
+            }
+        }
+        historyIndex = -1
         inputText = ""
         pty.write(text + "\n")
     }
@@ -437,104 +504,7 @@ final class PTYProcess: @unchecked Sendable {
     }
 }
 
-// MARK: - ANSI Parser + Terminal Line
 
-struct TerminalOutputLine: Identifiable {
-    let id = UUID()
-    let raw: String
-    
-    /// Parse ANSI escape codes into a colored AttributedString.
-    var attributed: AttributedString {
-        ANSIParser.parse(raw)
-    }
-}
-
-/// Parses ANSI escape sequences into styled AttributedString.
-enum ANSIParser {
-    // Regex to match ANSI escape sequences: ESC[ ... m
-    private static let ansiPattern = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*m", options: [])
-    // Also strip other escape sequences (cursor movement, etc.)
-    private static let otherEscapes = try! NSRegularExpression(pattern: "\\x1B\\[[0-9;]*[A-HJKSTfn]|\\x1B\\].*?\\x07|\\x1B\\(B", options: [])
-    
-    static func parse(_ raw: String) -> AttributedString {
-        let clean = otherEscapes.stringByReplacingMatches(
-            in: raw, range: NSRange(raw.startIndex..., in: raw), withTemplate: ""
-        )
-        
-        var result = AttributedString()
-        var currentColor: Color = .primary
-        var isBold = false
-        var isDim = false
-        
-        let nsString = clean as NSString
-        let matches = ansiPattern.matches(in: clean, range: NSRange(location: 0, length: nsString.length))
-        
-        var lastEnd = 0
-        
-        for match in matches {
-            // Text before this escape sequence
-            if match.range.location > lastEnd {
-                let textRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
-                let text = nsString.substring(with: textRange)
-                var attr = AttributedString(text)
-                attr.foregroundColor = isDim ? currentColor.opacity(0.6) : currentColor
-                if isBold { attr.font = .system(size: 12, weight: .bold, design: .monospaced) }
-                result += attr
-            }
-            
-            // Parse the escape code
-            let code = nsString.substring(with: match.range)
-            let numbers = code.dropFirst(2).dropLast()
-                .split(separator: ";")
-                .compactMap { Int($0) }
-            
-            for num in (numbers.isEmpty ? [0] : numbers) {
-                switch num {
-                case 0:  currentColor = .primary; isBold = false; isDim = false
-                case 1:  isBold = true
-                case 2:  isDim = true
-                case 22: isBold = false; isDim = false
-                case 30: currentColor = Color(.darkGray)
-                case 31: currentColor = Color(.systemRed)
-                case 32: currentColor = Color(.systemGreen)
-                case 33: currentColor = Color(.systemYellow)
-                case 34: currentColor = Color(.systemBlue)
-                case 35: currentColor = Color(.systemPurple)
-                case 36: currentColor = Color(.systemTeal)
-                case 37: currentColor = .white
-                case 39: currentColor = .primary
-                case 90: currentColor = .gray
-                case 91: currentColor = Color(.systemRed).opacity(0.8)
-                case 92: currentColor = Color(.systemGreen).opacity(0.8)
-                case 93: currentColor = Color(.systemYellow).opacity(0.8)
-                case 94: currentColor = Color(.systemBlue).opacity(0.8)
-                case 95: currentColor = Color(.systemPurple).opacity(0.8)
-                case 96: currentColor = Color(.systemTeal).opacity(0.8)
-                case 97: currentColor = .white
-                default: break
-                }
-            }
-            
-            lastEnd = match.range.location + match.range.length
-        }
-        
-        // Remaining text after last escape
-        if lastEnd < nsString.length {
-            let text = nsString.substring(from: lastEnd)
-            var attr = AttributedString(text)
-            attr.foregroundColor = isDim ? currentColor.opacity(0.6) : currentColor
-            if isBold { attr.font = .system(size: 12, weight: .bold, design: .monospaced) }
-            result += attr
-        }
-        
-        // If no escapes found, just return plain text
-        if matches.isEmpty && result.characters.isEmpty {
-            result = AttributedString(clean)
-        }
-        
-        return result
-    }
-}
 
 struct TerminalLine: Identifiable {
     let id = UUID()
@@ -705,10 +675,14 @@ enum ShellHelper {
                 
                 do {
                     try process.run()
-                    process.waitUntilExit()
                     
+                    // Prevent deadlock: Read sequentially is usually fine if stderr is mostly empty.
+                    // To be safe, we read output completely to drain the pipe, then error.
+                    // GitHelper pipes 2>/dev/null anyway.
                     let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
                     let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    
+                    process.waitUntilExit()
                     
                     let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     let error = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -718,6 +692,65 @@ enum ShellHelper {
                     continuation.resume(returning: Result(output: "", error: error.localizedDescription, exitCode: -1))
                 }
             }
+        }
+    }
+}
+
+// MARK: - AppKit Wrappers
+
+struct TerminalInputArea: NSViewRepresentable {
+    @Binding var text: String
+    var onCommit: () -> Void
+    var onUp: () -> Void
+    var onDown: () -> Void
+    var onTab: () -> Void
+    
+    func makeNSView(context: Context) -> NSTextField {
+        let tf = NSTextField()
+        tf.delegate = context.coordinator
+        tf.focusRingType = .none
+        tf.drawsBackground = false
+        tf.isBordered = false
+        tf.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        tf.placeholderString = "Type here..."
+        return tf
+    }
+    
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: TerminalInputArea
+        init(_ parent: TerminalInputArea) { self.parent = parent }
+        
+        func controlTextDidChange(_ obj: Notification) {
+            guard let tf = obj.object as? NSTextField else { return }
+            parent.text = tf.stringValue
+        }
+        
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.text = textView.string
+                parent.onCommit()
+                return true
+            } else if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                parent.onUp()
+                return true
+            } else if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                parent.onDown()
+                return true
+            } else if commandSelector == #selector(NSResponder.insertTab(_:)) {
+                parent.onTab()
+                return true
+            }
+            return false
         }
     }
 }
