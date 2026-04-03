@@ -39,12 +39,11 @@ struct MessageBubbleView: View, Equatable {
                 }
                 
                 // Content bubble.
-                // Always shown for user messages with content.
-                // For assistant: shown if there is content. During streaming,
-                // only show the empty bubble if there is NO reasoning (avoids
-                // duplicate "thinking" indicators).
+                // FIXED (v2.5.4): Always show the bubble during streaming (even if only reasoning).
+                // The old logic hid the bubble when reasoning was non-empty, causing
+                // the "blank screen" bug where the user saw nothing while the model was thinking.
                 let hasContent = !message.content.isEmpty
-                let showBubble = hasContent || (message.role == .assistant && message.isStreaming && (message.reasoning ?? "").isEmpty)
+                let showBubble = hasContent || message.role == .user || (message.role == .assistant && message.isStreaming)
 
                 if showBubble {
                     Group {
