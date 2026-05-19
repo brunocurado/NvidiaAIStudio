@@ -8,26 +8,34 @@ struct SettingsView: View {
     private var theme: AppTheme { AppTheme.find(id: appThemeID) }
     
     var body: some View {
-        TabView {
-            APIKeysSettingsView()
-                .tabItem { Label("API Keys", systemImage: "key.fill") }
-            ModelsSettingsView()
-                .tabItem { Label("Models", systemImage: "cpu.fill") }
-            GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "gearshape.fill") }
-            GitHubSettingsView()
-                .tabItem { Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right") }
-            MCPSettingsView()
-                .tabItem { Label("MCP", systemImage: "puzzlepiece.extension.fill") }
-            SSHSettingsView()
-                .tabItem { Label("SSH", systemImage: "terminal.fill") }
+        ZStack {
+            // Real Liquid Glass background context
+            GlassCanvasBackdrop()
+            
+            // Subtly colored overlay matching the selected theme
+            theme.backgroundTint.ignoresSafeArea()
+            
+            TabView {
+                APIKeysSettingsView()
+                    .tabItem { Label("API Keys", systemImage: "key.fill") }
+                ModelsSettingsView()
+                    .tabItem { Label("Models", systemImage: "cpu.fill") }
+                GeneralSettingsView()
+                    .tabItem { Label("General", systemImage: "gearshape.fill") }
+                GitHubSettingsView()
+                    .tabItem { Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right") }
+                MCPSettingsView()
+                    .tabItem { Label("MCP", systemImage: "puzzlepiece.extension.fill") }
+                SSHSettingsView()
+                    .tabItem { Label("SSH", systemImage: "terminal.fill") }
+            }
         }
         .frame(width: 620, height: 560)
-        .background(theme.backgroundTint.ignoresSafeArea())
         .background(WindowAccessor(window: $window))
         .onChange(of: window) { _, w in
             w?.titlebarAppearsTransparent = true
             w?.backgroundColor = .clear
+            w?.isMovableByWindowBackground = true
         }
         .onChange(of: theme) { _, newTheme in
             window?.backgroundColor = .clear
