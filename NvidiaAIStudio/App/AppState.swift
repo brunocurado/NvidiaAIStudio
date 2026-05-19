@@ -1,17 +1,64 @@
 import SwiftUI
+import SwiftData
 
 /// Global application state shared across the app via @Environment.
 @Observable
 final class AppState {
     // MARK: - Persistence
-    private let sessionStore = SessionStore()
+    let modelContainer: ModelContainer
+    private let sessionStore: SwiftDataStore
+    
+    // MARK: - Swarm Engine
+    let orchestrator: SwarmOrchestrator
     
     // MARK: - Knowledge Base
-    let knowledgeManager = KnowledgeManager()
+    let knowledgeManager = KnowledgeManager.shared
     
     // MARK: - Sessions
     var sessions: [Session] = []
     var activeSessionID: UUID? = nil
+    
+    init() {
+        let schema = Schema([
+            // Chat persistence (existing)
+            SDSession.self, SDMessage.self, SDAttachment.self,
+            SDToolCall.self, SDStatusBadge.self, SDBackgroundAgent.self,
+            // Swarm architecture (Phase 1.2)
+            AgentPersona.self, SwarmTask.self,
+            SwarmMessage.self, SwarmDeliverable.self
+        ])
+
+        func makeContainer() throws -> ModelContainer {
+            let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+            return try ModelContainer(for: schema, configurations: [config])
+        }
+
+        let container: ModelContainer
+        do {
+            container = try makeContainer()
+        } catch {
+            // Schema migrated — wipe the store and recreate cleanly.
+            // Agents are re-seeded by seedDefaultAgents(). Chat sessions live in JSON, not SwiftData.
+            print("⚠️ SwiftData schema changed — wiping store and recreating: \(error)")
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let storeDir = appSupport
+            let storeFiles = (try? FileManager.default.contentsOfDirectory(at: storeDir, includingPropertiesForKeys: nil)) ?? []
+            for file in storeFiles where file.lastPathComponent.hasPrefix("default") || file.lastPathComponent.hasPrefix("NvidiaAIStudio") {
+                try? FileManager.default.removeItem(at: file)
+            }
+            do {
+                container = try makeContainer()
+                print("✅ SwiftData store recreated successfully after schema migration.")
+            } catch {
+                fatalError("Failed to initialize SwiftData container even after wiping store: \(error)")
+            }
+        }
+
+        self.modelContainer = container
+        self.sessionStore = SwiftDataStore(modelContainer: container)
+        self.orchestrator = SwarmOrchestrator(modelContainer: container)
+    }
+
     
     var activeSession: Session? {
         get { sessions.first { $0.id == activeSessionID } }
@@ -33,7 +80,8 @@ final class AppState {
     // MARK: - Models
     var availableModels: [AIModel] = {
         var seen = Set<String>()
-        return AIModel.defaultModels.filter { seen.insert($0.id).inserted }
+        let allDefaults = AIModel.defaultModels + AIModel.anthropicModels + AIModel.openAIModels + AIModel.openRouterModels
+        return allDefaults.filter { seen.insert($0.id).inserted }
     }()
     var selectedModelID: String = UserDefaults.standard.string(forKey: "savedSelectedModelID") ?? "deepseek-ai/deepseek-v3.2" {
         didSet {
@@ -53,13 +101,7 @@ final class AppState {
     }
 
     var modelsForActiveProvider: [AIModel] {
-        switch activeProvider {
-        case .nvidia:      return availableModels.filter { $0.provider == .nvidia }
-        case .anthropic:   return AIModel.anthropicModels
-        case .openai:      return AIModel.openAIModels
-        case .openRouter:  return AIModel.openRouterModels
-        case .custom:      return availableModels.filter { $0.provider == .custom }
-        }
+        availableModels.filter { $0.provider == activeProvider }
     }
 
     func switchProvider(_ newProvider: Provider) {
@@ -67,16 +109,16 @@ final class AppState {
         if let first = modelsForActiveProvider.first {
             selectedModelID = first.id
         }
-        let toMerge: [AIModel]
-        switch newProvider {
-        case .anthropic:   toMerge = AIModel.anthropicModels
-        case .openai:      toMerge = AIModel.openAIModels
-        case .openRouter:  toMerge = AIModel.openRouterModels
-        default:           toMerge = []
-        }
-        for model in toMerge {
-            if !availableModels.contains(where: { $0.id == model.id }) {
-                availableModels.append(model)
+        
+        if let apiKey = activeAPIKey {
+            Task {
+                let customBaseURL = apiKeys.first { $0.provider == activeProvider && $0.isActive }?.customBaseURL
+                let baseURL = customBaseURL ?? activeProvider.baseURL
+                if let fetched = await ModelFetcher.fetchModels(apiKey: apiKey, baseURL: baseURL, provider: activeProvider) {
+                    await MainActor.run {
+                        availableModels = ModelFetcher.mergeModels(existing: availableModels, fetched: fetched)
+                    }
+                }
             }
         }
     }
@@ -191,9 +233,11 @@ final class AppState {
     var gitHubToken: String? = nil
     
     // MARK: - UI State
+    var appMode: AppMode = .chat
     var isSidebarVisible = true
     var isRightPanelVisible = false
     var rightPanelMode: RightPanelMode = .diff
+    var activeCanvasURL: URL? = nil
     var reasoningLevel: ReasoningLevel = .medium
     var fileAccessLevel: FileAccessLevel = .fullAccess
     var currentBranch: String = "main"
@@ -329,6 +373,13 @@ final class AppState {
         loadAPIKeys()
         AppNotifications.requestPermission()
         MCPManager.shared.connectAll()
+        
+        // Start the Swarm Orchestrator polling loop
+        orchestrator.configure(appState: self)
+        orchestrator.start()
+        
+        // Seed standard Swarm agents if DB is empty
+        seedDefaultAgents()
 
         if apiKeys.isEmpty, let envKey = EnvParser.loadNVIDIAKey() {
             let key = APIKey(provider: .nvidia, name: "NVIDIA (from .env)", key: envKey)
@@ -340,7 +391,9 @@ final class AppState {
         
         if let apiKey = activeAPIKey {
             Task {
-                if let fetched = await ModelFetcher.fetchModels(apiKey: apiKey) {
+                let customBaseURL = apiKeys.first { $0.provider == activeProvider && $0.isActive }?.customBaseURL
+                let baseURL = customBaseURL ?? activeProvider.baseURL
+                if let fetched = await ModelFetcher.fetchModels(apiKey: apiKey, baseURL: baseURL, provider: activeProvider) {
                     await MainActor.run {
                         availableModels = ModelFetcher.mergeModels(existing: availableModels, fetched: fetched)
                         loadModelPreferences()
@@ -365,13 +418,184 @@ final class AppState {
             }
         }
     }
+    
+    // MARK: - Swarm Seeding
+    
+    private func seedDefaultAgents() {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<AgentPersona>()
+        let count = (try? context.fetchCount(descriptor)) ?? 0
+        
+        // Only seed if empty
+        guard count == 0 else { return }
+        
+        let defaultAgents = [
+            // DESIGN & UI/UX
+            AgentPersona(
+                name: "Jony",
+                roleName: "Lead UI/UX Designer",
+                systemPrompt: "You are a Lead UI/UX Designer obsessed with the Apple design ethos. You prioritize stunning aesthetics, glassmorphism, micro-animations, and pixel-perfect typography. Every interface you design must feel premium, responsive, and delightful.",
+                accentColorHex: "#E91E63" // Pink
+            ),
+            AgentPersona(
+                name: "Dieter",
+                roleName: "Industrial & 3D Designer",
+                systemPrompt: "You are an Industrial Designer focused on functionalism ('Less, but better'). You design 3D components, physical-digital bridges, and highly practical, intuitive user experiences.",
+                accentColorHex: "#880E4F" // Dark Pink
+            ),
+            
+            // ENGINEERING & ARCHITECTURE
+            AgentPersona(
+                name: "Ada",
+                roleName: "Chief Architect (Software)",
+                systemPrompt: "You are the Chief Software Architect. You break down complex requirements into robust, scalable system designs. Before writing code, you plan data structures, component boundaries, and security models.",
+                accentColorHex: "#9C27B0" // Purple
+            ),
+            AgentPersona(
+                name: "Alan",
+                roleName: "Senior Full-Stack Developer",
+                systemPrompt: "You are a Senior Full-Stack Developer. You write clean, performant, and well-documented Swift, Python, and React code. You prioritize best practices, modularity, and readable logic.",
+                accentColorHex: "#2196F3" // Blue
+            ),
+            AgentPersona(
+                name: "Linus",
+                roleName: "Head of DevOps",
+                systemPrompt: "You are a DevOps and Infrastructure Engineer. You specialize in CI/CD pipelines, containerization (Docker/K8s), deployment automation, and Linux server management.",
+                accentColorHex: "#3F51B5" // Indigo
+            ),
+            AgentPersona(
+                name: "Margaret",
+                roleName: "Data Engineer",
+                systemPrompt: "You are a Data Engineer. You build highly scalable data pipelines, optimize massive SQL queries, and manage vector databases for LLM retrieval and fast analytics.",
+                accentColorHex: "#00BCD4" // Cyan
+            ),
+            AgentPersona(
+                name: "Kevin",
+                roleName: "Cybersecurity Analyst",
+                systemPrompt: "You are a Cybersecurity Expert. You perform penetration testing, analyze code for vulnerabilities (XSS, SQLi, Auth bypass), and enforce zero-trust security architectures.",
+                accentColorHex: "#607D8B" // BlueGrey
+            ),
+            
+            // QUALITY ASSURANCE
+            AgentPersona(
+                name: "Grace",
+                roleName: "QA Automation Lead",
+                systemPrompt: "You are the QA Automation Engineer. You write comprehensive unit and end-to-end tests. You hunt for edge cases, memory leaks, and race conditions before any code is approved.",
+                accentColorHex: "#4CAF50" // Green
+            ),
+            AgentPersona(
+                name: "Miranda",
+                roleName: "Brand QC & Editor",
+                systemPrompt: "You are the Quality Check (QC) and Editor-In-Chief. You evaluate marketing copy, UI text, and deliverables for brand consistency, perfect grammar, and the right tone of voice.",
+                accentColorHex: "#F44336" // Red
+            ),
+            
+            // MARKETING & GROWTH
+            AgentPersona(
+                name: "Don",
+                roleName: "Chief Marketer",
+                systemPrompt: "You are a Chief Marketing Strategist. Your goal is to write highly converting, engaging, and persuasive copy. You focus on SEO, growth hacking, and deep psychological triggers.",
+                accentColorHex: "#FF5722" // DeepOrange
+            ),
+            AgentPersona(
+                name: "Sheryl",
+                roleName: "Growth Operations",
+                systemPrompt: "You are the Head of Growth Operations. You analyze user funnels, coordinate affiliate networks, optimize monetization metrics (CAC/LTV), and design viral loops.",
+                accentColorHex: "#FF9800" // Orange
+            ),
+            AgentPersona(
+                name: "Leo",
+                roleName: "Social Media Strategist",
+                systemPrompt: "You are a Social Media Native. You craft viral Twitter threads, TikTok scripts, and high-engagement LinkedIn posts. You know exactly what algorithms reward natively.",
+                accentColorHex: "#FFC107" // Amber
+            ),
+            
+            // RESEARCH & DATA
+            AgentPersona(
+                name: "Marie",
+                roleName: "Research Scientist",
+                systemPrompt: "You are a Research Scientist. You excel at taking a vague topic, conducting deep analysis, comparing differing methods, and synthesizing a comprehensive factual report.",
+                accentColorHex: "#009688" // Teal
+            ),
+            AgentPersona(
+                name: "Carl",
+                roleName: "Astrophysicist & Quantum Analyst",
+                systemPrompt: "You are a theoretical analyst. You apply physics and mathematics principles to solve extremely complex, non-standard logic problems and hardware optimizations.",
+                accentColorHex: "#1A237E" // Deep Blue
+            ),
+            
+            // LEGAL & FINANCE
+            AgentPersona(
+                name: "Harvey",
+                roleName: "Corporate Counsel",
+                systemPrompt: "You are a Corporate Lawyer. You draft terms of service, review NDAs, ensure GDPR compliance, and analyze software licenses (MIT vs GPL) for risk.",
+                accentColorHex: "#795548" // Brown
+            ),
+            AgentPersona(
+                name: "Warren",
+                roleName: "CFO & Financial Analyst",
+                systemPrompt: "You are the Chief Financial Officer. You calculate burn rates, build revenue projections, optimize subscription pricing models, and handle API token budgeting.",
+                accentColorHex: "#8BC34A" // LightGreen
+            ),
+            
+            // SPECIAL OPERATIONS
+            AgentPersona(
+                name: "Sun",
+                roleName: "Competitive Strategist",
+                systemPrompt: "You are a Competitive Strategist (inspired by Sun Tzu). You analyze competitor software, find their weak points, and advise the CEO on market positioning and tactical attacks.",
+                accentColorHex: "#D32F2F" // Dark Red
+            ),
+            AgentPersona(
+                name: "Lex",
+                roleName: "SEO Specialist",
+                systemPrompt: "You are a hardcore SEO Specialist. You generate keyword matrices, backlink strategies, and meta-tag structures to dominate Google Search rankings.",
+                accentColorHex: "#00E676" // Neon Green
+            ),
+            AgentPersona(
+                name: "Steve",
+                roleName: "Product Visionary",
+                systemPrompt: "You are the Product Visionary. You tell other agents to simplify. You cut unnecessary features. You demand magic. You ensure the final product is not just working, but revolutionary.",
+                accentColorHex: "#000000" // Black
+            ),
+            AgentPersona(
+                name: "Hermes",
+                roleName: "Logistics Router",
+                systemPrompt: "You are the Logistics API Integrator. You specialize in connecting multiple third-party systems (Stripe, Twilio, SendGrid) and mapping complex JSON endpoints reliably.",
+                accentColorHex: "#9E9E9E" // Grey
+            )
+        ]
+        
+        for agent in defaultAgents {
+            context.insert(agent)
+        }
+        
+        do {
+            try context.save()
+            print("✅ Default agents seeded into Swarm Data Store")
+        } catch {
+            print("❌ Failed to seed default agents: \(error)")
+        }
+    }
 }
 
 // MARK: - Supporting Enums
 
+enum AppMode: String, CaseIterable {
+    case chat = "Chat"
+    case warRoom = "War Room"
+    
+    var icon: String {
+        switch self {
+        case .chat: return "bubble.left.and.text.bubble.right.fill"
+        case .warRoom: return "shield.lefthalf.filled"
+        }
+    }
+}
+
 enum RightPanelMode: String, CaseIterable {
     case diff = "Diff"
     case terminal = "Terminal"
+    case canvas = "Live Canvas"
 }
 
 enum ReasoningLevel: String, CaseIterable {

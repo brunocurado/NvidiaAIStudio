@@ -66,6 +66,7 @@ struct SidebarView: View {
                 SidebarActionButton(icon: "chart.bar.fill", label: "Usage", accentColor: .blue) {
                     showUsagePanel = true
                 }
+                WarRoomSidebarButton()
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
@@ -75,7 +76,7 @@ struct SidebarView: View {
                 TextField("Search threads...", text: $searchText).textFieldStyle(.plain).font(.subheadline)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
+            .macContentBoard(in: Capsule())
             .padding(.horizontal, 12)
             
             Divider().padding(.vertical, 8)
@@ -239,7 +240,7 @@ struct ProjectFolderView: View {
                     Text("\(sessions.count)")
                         .font(.system(size: 11, weight: .bold)).foregroundStyle(.secondary)
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.white.opacity(0.08), in: Capsule())
+                        .background(GlassTheme.flatFill, in: Capsule())
                     Spacer()
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
@@ -320,14 +321,12 @@ struct SidebarActionButton: View {
                 Spacer()
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(
-                isHovered
-                    ? RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07))
-                    : nil
+            .glassEffect(
+                isHovered ? .clear.interactive() : .identity,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
-            .glassEffect(isHovered ? .regular : .identity, in: RoundedRectangle(cornerRadius: 8))
             .scaleEffect(isHovered ? 1.01 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -355,14 +354,12 @@ struct WorkspaceSidebarButton: View {
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(
-                isHovered
-                    ? RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07))
-                    : nil
+            .glassEffect(
+                isHovered ? .clear.interactive() : .identity,
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
-            .glassEffect(isHovered ? .regular : .identity, in: RoundedRectangle(cornerRadius: 8))
             .scaleEffect(isHovered ? 1.01 : 1.0)
-            .animation(.easeOut(duration: 0.12), value: isHovered)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -452,6 +449,8 @@ struct ThreadItemView: View {
     var onDuplicate: (() -> Void)? = nil
     @State private var isRenaming = false
     @State private var renameText = ""
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
+    private var theme: AppTheme { AppTheme.find(id: appThemeID) }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -464,7 +463,7 @@ struct ThreadItemView: View {
                     Text("\(session.backgroundAgents.count)")
                         .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(.blue.opacity(0.6), in: Capsule())
+                        .background(theme.accentColor.opacity(0.6), in: Capsule())
                 }
                 Spacer()
                 Text(session.relativeTime).font(.system(size: 12)).foregroundStyle(.secondary)
@@ -472,26 +471,22 @@ struct ThreadItemView: View {
             ForEach(session.backgroundAgents) { agent in
                 HStack(spacing: 6) {
                     Circle().fill(agentStatusColor(agent.status)).frame(width: 6, height: 6)
-                    Text(agent.name).font(.system(size: 12, weight: .medium)).foregroundStyle(.blue)
+                    Text(agent.name).font(.system(size: 12, weight: .medium)).foregroundStyle(theme.accentColor)
                     Text(agent.task).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .padding(.leading, 4)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 9)
-        .background(
-            isSelected
-                ? RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.12))
-                : (isHovered ? RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.05)) : nil)
-        )
         .glassEffect(
             isSelected
-                ? .regular.tint(.blue.opacity(0.18))
-                : (isHovered ? .regular : .identity),
-            in: RoundedRectangle(cornerRadius: 8)
+                ? .clear.tint(theme.accentColor.opacity(0.18)).interactive()
+                : (isHovered ? .clear.interactive() : .identity),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .scaleEffect(isSelected ? 1.005 : 1.0)
-        .animation(.easeOut(duration: 0.15), value: isSelected)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSelected)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
     }
     
     private func agentStatusColor(_ status: BackgroundAgent.AgentStatus) -> Color {
@@ -502,5 +497,57 @@ struct ThreadItemView: View {
         case .completed: return .green
         case .failed: return .red
         }
+    }
+}
+
+// MARK: - War Room Sidebar Button
+
+struct WarRoomSidebarButton: View {
+    @Environment(AppState.self) private var appState
+    @State private var isHovered = false
+    
+    private var badgeCount: Int {
+        appState.orchestrator.runningTasks.count + appState.orchestrator.unreadDeliverableCount
+    }
+    
+    private var isActive: Bool { appState.appMode == .warRoom }
+    
+    var body: some View {
+        Button {
+            withAnimation(.spring(duration: 0.3)) {
+                appState.appMode = isActive ? .chat : .warRoom
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "shield.lefthalf.filled")
+                    .font(.subheadline)
+                    .foregroundStyle(isActive ? .green : .red)
+                    .frame(width: 16)
+                Text("War Room")
+                    .font(.subheadline)
+                Spacer()
+                if badgeCount > 0 {
+                    Text("\(badgeCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(isActive ? .green : .orange, in: Capsule())
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .glassEffect(
+                isActive
+                    ? .clear.tint(.green.opacity(0.18)).interactive()
+                    : (isHovered ? .clear.interactive() : .identity),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .scaleEffect(isHovered ? 1.01 : 1.0)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
+            .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isActive)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }

@@ -1,74 +1,40 @@
 import SwiftUI
 
 /// Apple-style animated splash screen shown as the first view.
-/// Uses the same neural brain aesthetic as the app icon.
+/// Uses GlassMedallion and GlassCanvasBackdrop for Liquid Glass aesthetic.
 struct SplashScreenView: View {
     @Binding var isFinished: Bool
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
     
-    @State private var iconScale: CGFloat = 0.6
-    @State private var iconBlur: CGFloat = 20
+    @State private var medallionScale: CGFloat = 0.6
+    @State private var medallionBlur: CGFloat = 20
+    @State private var pulseScale: CGFloat = 1.0
     @State private var titleOpacity: Double = 0
     @State private var titleOffset: CGFloat = 12
     @State private var subtitleOpacity: Double = 0
-    @State private var glowOpacity: Double = 0.4
     @State private var dotsIndex = 0
+    
+    private var theme: AppTheme { AppTheme.find(id: appThemeID) }
     
     // Timer for animating dots
     private let dotsTimer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ZStack {
-            // Deep dark gradient background (navy → dark purple)
-            LinearGradient(
-                colors: [
-                    Color(red: 0.04, green: 0.04, blue: 0.10),
-                    Color(red: 0.06, green: 0.03, blue: 0.12),
-                    Color(red: 0.04, green: 0.04, blue: 0.08)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Glass refraction anchor — wallpaper shows through
+            GlassCanvasBackdrop()
+            
+            // Subtle theme tint overlay
+            theme.backgroundTint
+                .ignoresSafeArea()
             
             VStack(spacing: 0) {
                 Spacer()
                 
-                // Neural brain icon
-                ZStack {
-                    // Glow behind icon
-                    Circle()
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    Color(red: 0.46, green: 0.72, blue: 0).opacity(glowOpacity * 0.4),
-                                    .clear
-                                ],
-                                center: .center,
-                                startRadius: 30,
-                                endRadius: 140
-                            )
-                        )
-                        .frame(width: 280, height: 280)
-                    
-                    // Brain neural network — drawn with SF Symbol + stylized paths
-                    NeuralBrainShape()
-                        .stroke(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.46, green: 0.72, blue: 0),    // NVIDIA green
-                                    Color(red: 0.30, green: 0.85, blue: 0.20)  // bright green
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-                        )
-                        .shadow(color: Color(red: 0.46, green: 0.72, blue: 0).opacity(0.8), radius: 8)
-                        .shadow(color: Color(red: 0.46, green: 0.72, blue: 0).opacity(0.4), radius: 20)
-                        .frame(width: 120, height: 100)
-                }
-                .scaleEffect(iconScale)
-                .blur(radius: iconBlur)
+                // Brand medallion — glass circle with neural icon
+                GlassMedallion("brain.head.profile.fill", size: 88, accent: theme.accentColor)
+                    .scaleEffect(medallionScale * pulseScale)
+                    .blur(radius: medallionBlur)
                 
                 Spacer()
                     .frame(height: 40)
@@ -76,7 +42,7 @@ struct SplashScreenView: View {
                 // Title
                 Text("Nvidia AI Studio")
                     .font(.system(size: 32, weight: .ultraLight, design: .default))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(GlassTheme.textPrimary)
                     .opacity(titleOpacity)
                     .offset(y: titleOffset)
                 
@@ -86,7 +52,7 @@ struct SplashScreenView: View {
                 // Subtitle with animated dots
                 Text("AI Development Environment" + String(repeating: ".", count: dotsIndex))
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.4))
+                    .foregroundStyle(GlassTheme.textMuted)
                     .opacity(subtitleOpacity)
                     .onReceive(dotsTimer) { _ in
                         dotsIndex = (dotsIndex + 1) % 4
@@ -101,15 +67,15 @@ struct SplashScreenView: View {
     }
     
     private func startAnimations() {
-        // Icon: scale + blur → clear (spring)
+        // Medallion: scale + blur → clear (spring)
         withAnimation(.spring(response: 0.8, dampingFraction: 0.7).delay(0.3)) {
-            iconScale = 1.0
-            iconBlur = 0
+            medallionScale = 1.0
+            medallionBlur = 0
         }
         
-        // Glow pulse
-        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true).delay(0.5)) {
-            glowOpacity = 1.0
+        // Breathing pulse on the medallion
+        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true).delay(0.5)) {
+            pulseScale = 1.04
         }
         
         // Title fade-in + slide

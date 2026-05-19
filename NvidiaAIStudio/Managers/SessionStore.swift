@@ -2,6 +2,7 @@ import Foundation
 
 /// Persists sessions to disk as JSON files.
 /// Each session is saved to: ~/Library/Application Support/NvidiaAIStudio/sessions/<id>.json
+/// Each session is saved to: ~/Library/Application Support/NvidiaAIStudioDev/sessions/<id>.json
 actor SessionStore {
     
     private let sessionsDir: URL
@@ -10,7 +11,7 @@ actor SessionStore {
     
     init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        sessionsDir = appSupport.appendingPathComponent("NvidiaAIStudio/sessions", isDirectory: true)
+        sessionsDir = appSupport.appendingPathComponent("NvidiaAIStudioDev/sessions", isDirectory: true)
         
         // Create directory if needed
         try? FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)

@@ -87,7 +87,12 @@ final class OpenAIAPIService: AIProvider {
         tools: [[String: Any]]?,
         reasoningLevel: ReasoningLevel
     ) throws -> URLRequest {
-        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+        var base = baseURL
+        if !base.hasSuffix("/v1") && !base.contains("/v1/") && !base.hasSuffix("/v1/") {
+            base = base.hasSuffix("/") ? base + "v1" : base + "/v1"
+        }
+        
+        guard let url = URL(string: "\(base)/chat/completions") else {
             throw APIServiceError.invalidURL
         }
 
@@ -107,8 +112,13 @@ final class OpenAIAPIService: AIProvider {
 
         // Max tokens — o1/o3 models use max_completion_tokens
         let isReasoningModel = model.id.hasPrefix("o1") || model.id.hasPrefix("o3")
+        let isOpenRouter = baseURL.contains("openrouter.ai")
         if isReasoningModel {
             body["max_completion_tokens"] = 16000
+        } else if isOpenRouter {
+            // If the model has a massive context window (>200k), allow huge generation (131k)
+            // Otherwise, request a safe 16k output to leave enough room for the input context and prevent overflow.
+            body["max_tokens"] = model.contextWindow > 200_000 ? 131072 : 16000
         } else {
             body["max_tokens"] = 16000
         }
@@ -151,7 +161,15 @@ final class OpenAIAPIService: AIProvider {
         case 401: throw APIServiceError.unauthorized
         case 429: throw APIServiceError.rateLimited(retryAfter: nil)
         case 400...599:
-            throw APIServiceError.serverError(statusCode: http.statusCode, message: "HTTP \(http.statusCode)")
+            // Extract the actual error message from the JSON body instead of just HTTP 404
+            var errorBody = ""
+            for try await line in bytes.lines {
+                errorBody += line
+            }
+            let errorMessage = (try? JSONSerialization.jsonObject(with: Data(errorBody.utf8)) as? [String: Any])?["error"] as? [String: Any]
+            let detail = (errorMessage?["message"] as? String) ?? errorBody
+            let finalMessage = detail.isEmpty ? "HTTP \(http.statusCode)" : detail
+            throw APIServiceError.serverError(statusCode: http.statusCode, message: finalMessage)
         default: break
         }
 

@@ -6,6 +6,8 @@ import AppKit
 @Observable
 final class KnowledgeManager {
     
+    static let shared = KnowledgeManager()
+    
     var files: [KnowledgeFile] = []
     var collections: [KnowledgeCollection] = []
     var activeCollectionID: UUID? = nil    // nil = Default collection
@@ -15,9 +17,9 @@ final class KnowledgeManager {
     static let maxFiles = 100
     private static let chunkSize = 2000   // chars per chunk
     
-    private let storageURL: URL = {
+    private var storageURL: URL = {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("NvidiaAIStudio/knowledge", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("NvidiaAIStudioDev/knowledge", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }()
@@ -286,41 +288,55 @@ final class KnowledgeManager {
     
     /// Build context string from digests for injection into the system prompt.
     func buildContext(query: String) -> String {
-        let enabledFiles = activeFiles.filter { $0.isEnabled && $0.digestStatus == .completed }
+        // Search across ALL enabled files in ALL collections
+        let enabledFiles = files.filter { $0.isEnabled && $0.digestStatus == .completed }
         guard !enabledFiles.isEmpty else { return "" }
         
-        var context = "\n\n## Knowledge Base Context\nThe user has a knowledge base with the following documents. Use this context to answer their questions accurately.\n\n"
+        var context = "SEARCH RESULTS FROM KNOWLEDGE BASE:\n"
+        context += "Files available: " + enabledFiles.map { $0.filename }.joined(separator: ", ") + "\n\n"
         
-        // Inject all digests — they're compressed summaries, so they fit easily
+        // V3.0 Semantic Vector Retrieval
+        let queryVector = EmbeddingService.shared.vectorize(query)
+        var relevantChunks: [(file: String, chunk: KnowledgeFile.TextChunk, score: Double)] = []
+        
         for file in enabledFiles {
-            context += "### 📄 \(file.filename)\n"
-            context += file.digest
-            context += "\n\n---\n\n"
-        }
-        
-        // If the query matches specific chunks, add those too (for precision)
-        let queryWords = Set(query.lowercased().split(separator: " ").filter { $0.count > 3 }.map(String.init))
-        if !queryWords.isEmpty {
-            var relevantChunks: [(file: String, chunk: KnowledgeFile.TextChunk, score: Int)] = []
-            
-            for file in enabledFiles {
-                for chunk in file.chunks {
+            for chunk in file.chunks {
+                var score: Double = 0.0
+                
+                if let qv = queryVector, let cv = chunk.embedding {
+                    // Cosine Similarity Matchmaking
+                    score = EmbeddingService.shared.cosineSimilarity(a: qv, b: cv)
+                } else {
+                    // Fallback to basic lexical search if vectors missing
+                    let queryWords = Set(query.lowercased().split(separator: " ").filter { $0.count > 3 }.map(String.init))
                     let chunkLower = chunk.content.lowercased()
-                    let score = queryWords.filter { chunkLower.contains($0) }.count
-                    if score > 0 {
-                        relevantChunks.append((file.filename, chunk, score))
-                    }
+                    let wordMatches = queryWords.filter { chunkLower.contains($0) }.count
+                    score = Double(wordMatches) * 0.1
+                }
+                
+                // 0.35 similarity threshold for NL embeddings is usually decent to capture related semantics
+                if score > 0.35 || (queryVector == nil && score > 0.0) {
+                    relevantChunks.append((file.filename, chunk, score))
                 }
             }
-            
-            // Top 10 most relevant chunks
-            let topChunks = relevantChunks.sorted { $0.score > $1.score }.prefix(10)
-            if !topChunks.isEmpty {
-                context += "### Relevant Source Excerpts\n"
-                for item in topChunks {
-                    let pageInfo = item.chunk.pageNumber.map { " (Page \($0))" } ?? ""
-                    context += "**\(item.file)\(pageInfo):**\n\(item.chunk.content)\n\n"
-                }
+        }
+        
+        // Pick the top 15 most semantically relevant chunks across all knowledge files
+        let topChunks = relevantChunks.sorted { $0.score > $1.score }.prefix(15)
+        
+        if topChunks.isEmpty {
+            // Fallback: If no chunks hit the semantic threshold, inject truncated summaries
+            context += "### Knowledge Summaries\n"
+            for file in enabledFiles {
+                context += "#### 📄 \(file.filename)\n"
+                context += String(file.digest.prefix(2500)) + "...\n\n---\n\n"
+            }
+        } else {
+            // Inject only highly pertinent chunks
+            context += "### Relevant Source Excerpts\n"
+            for item in topChunks {
+                let pageInfo = item.chunk.pageNumber.map { " (Page \($0))" } ?? ""
+                context += "**\(item.file)\(pageInfo):**\n\(item.chunk.content)\n\n"
             }
         }
         
@@ -329,7 +345,7 @@ final class KnowledgeManager {
     
     /// Build image attachments for pages relevant to the query.
     func buildImageAttachments(query: String, maxImages: Int = 5) -> [Message.Attachment] {
-        let enabledFiles = activeFiles.filter { $0.isEnabled && $0.mimeType.contains("pdf") }
+        let enabledFiles = files.filter { $0.isEnabled && $0.mimeType.contains("pdf") }
         guard !enabledFiles.isEmpty else { return [] }
         
         let queryWords = Set(query.lowercased().split(separator: " ").filter { $0.count > 3 }.map(String.init))
@@ -460,7 +476,8 @@ final class KnowledgeManager {
         guard !clean.isEmpty else { return [] }
         
         if clean.count <= chunkSize {
-            return [KnowledgeFile.TextChunk(pageNumber: pageNumber, content: clean)]
+            let vector = EmbeddingService.shared.vectorize(clean)
+            return [KnowledgeFile.TextChunk(pageNumber: pageNumber, content: clean, embedding: vector)]
         }
         
         var chunks: [KnowledgeFile.TextChunk] = []
@@ -482,7 +499,8 @@ final class KnowledgeManager {
             
             let chunk = String(clean[startIndex..<endIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
             if !chunk.isEmpty {
-                chunks.append(KnowledgeFile.TextChunk(pageNumber: pageNumber, content: chunk))
+                let vector = EmbeddingService.shared.vectorize(chunk)
+                chunks.append(KnowledgeFile.TextChunk(pageNumber: pageNumber, content: chunk, embedding: vector))
             }
             startIndex = endIndex
         }

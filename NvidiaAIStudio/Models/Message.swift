@@ -1,4 +1,5 @@
 import Foundation
+import PDFKit
 
 struct Message: Identifiable, Codable, Equatable {
     let id: UUID
@@ -101,17 +102,41 @@ struct Message: Identifiable, Codable, Equatable {
     }
     
     func toAPIDict() -> [String: Any] {
-        var dict: [String: Any] = ["role": role.rawValue, "content": content]
+        var processedContent = content
         
+        // --- V2 Universal Dropzone Parsing ---
+        // Dynamically decode non-image assets directly into the LLM context wrapper
+        let docAttachments = attachments.filter { !$0.mimeType.starts(with: "image/") }
+        for att in docAttachments {
+            guard let data = Data(base64Encoded: att.data) else { continue }
+            var extracted = ""
+            
+            if att.mimeType == "application/pdf" {
+                if let pdf = PDFDocument(data: data) {
+                    for i in 0..<pdf.pageCount {
+                        if let page = pdf.page(at: i) { extracted += (page.string ?? "") + "\n" }
+                    }
+                }
+            } else if let str = String(data: data, encoding: .utf8) {
+                extracted = str
+            }
+            
+            if !extracted.isEmpty {
+                processedContent += "\n\n--- [Attached File: \(att.filename)] ---\n\(extracted)\n--- [End of File: \(att.filename)] ---\n"
+            } else {
+                processedContent += "\n\n--- [Attached File: \(att.filename)] ---\n[System: Could not extract text. Binary format or empty file.]\n--- [End of File] ---\n"
+            }
+        }
+        
+        var dict: [String: Any] = ["role": role.rawValue, "content": processedContent]
         let imageAttachments = attachments.filter { $0.mimeType.starts(with: "image/") }
         
         // Multimodal content: supported for user and tool roles
         if !imageAttachments.isEmpty && (role == .user || role == .tool) {
             var contentParts: [[String: Any]] = []
             
-            // Text part (tool results must always have text content)
-            if !content.isEmpty {
-                contentParts.append(["type": "text", "text": content])
+            if !processedContent.isEmpty {
+                contentParts.append(["type": "text", "text": processedContent])
             }
             
             for att in imageAttachments {
@@ -133,7 +158,7 @@ struct Message: Identifiable, Codable, Equatable {
                     "function": ["name": tc.name, "arguments": Self.sanitizeArguments(tc.arguments)] as [String: Any]
                 ]
             }
-            if content.isEmpty { dict["content"] = NSNull() }
+            if processedContent.isEmpty { dict["content"] = NSNull() }
         }
         
         // Tool result: inject tool_call_id (mandatory)

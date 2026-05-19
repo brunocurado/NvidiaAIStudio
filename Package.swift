@@ -18,8 +18,7 @@ let package = Package(
                 "build",
             ],
             resources: [
-                .copy("Resources/AppIcon.icns"),
-                .copy("Resources/PromptMaster"),
+                .process("Resources"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)

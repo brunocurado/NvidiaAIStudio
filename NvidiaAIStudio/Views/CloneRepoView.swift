@@ -74,7 +74,7 @@ struct CloneRepoView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 
@@ -272,6 +272,6 @@ struct RepoRowView: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(isSelected ? Color.blue.opacity(0.3) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .background(isSelected ? GlassTheme.purple.opacity(0.3) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
     }
 }

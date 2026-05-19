@@ -3,9 +3,8 @@ import AppKit
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
-    @AppStorage("appThemeID") private var appThemeID: String = "dark"
-    @AppStorage("glassOpacity") private var glassOpacity: Double = 0.25
-    @AppStorage("glassBlur") private var glassBlur: Double = 20.0
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
+
     var showSplash: Bool = false
     @State private var showGitPanel = false
     @State private var showCloneSheet = false
@@ -17,55 +16,33 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // Fundo base — escuro profundo como o GlassCode
+            // Glass refraction anchor — must be the FIRST layer
+            GlassCanvasBackdrop()
+
+            // Subtle theme tint overlay (semi-transparent per theme)
             theme.backgroundTint
-                .opacity(max(0.85, glassOpacity * 0.6 + 0.75))
                 .ignoresSafeArea()
-
-            // Glow ambient — canto superior esquerdo (cyan/teal)
-            RadialGradient(
-                colors: [
-                    theme.accentColor.opacity(0.5),
-                    Color.clear
-                ],
-                center: .topLeading,
-                startRadius: 0,
-                endRadius: 600
-            )
-            .ignoresSafeArea()
-
-            // Glow ambient — canto inferior direito
-            RadialGradient(
-                colors: [
-                    theme.accentColor.opacity(0.3),
-                    Color.clear
-                ],
-                center: .bottomTrailing,
-                startRadius: 0,
-                endRadius: 450
-            )
-            .ignoresSafeArea()
-
-            // Frosted wash subtil
-            if glassBlur > 0 {
-                Color.white
-                    .opacity(glassBlur / 50.0 * 0.04)
-                    .ignoresSafeArea()
-            }
 
             HStack(spacing: 0) {
                 if appState.isSidebarVisible {
                     SidebarView()
                         .frame(width: 260)
-                        .background(.ultraThinMaterial.opacity(0.3))
+                        .macSidebarRail()
                         .transition(.move(edge: .leading).combined(with: .opacity))
                     
                     Divider()
                         .transition(.opacity)
                 }
 
-                ChatView()
-                    .frame(maxWidth: .infinity)
+                switch appState.appMode {
+                case .chat:
+                    ChatView()
+                        .frame(maxWidth: .infinity)
+                case .warRoom:
+                    WarRoomView()
+                        .frame(maxWidth: .infinity)
+                        .environment(appState)
+                }
 
                 if appState.isRightPanelVisible {
                     // Draggable divider for right panel resize
@@ -92,7 +69,7 @@ struct ContentView: View {
                     
                     RightPanelView()
                         .frame(width: rightPanelWidth)
-                        .background(.ultraThinMaterial.opacity(0.3))
+                        .macSidebarRail()
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -198,7 +175,7 @@ struct ContentView: View {
                                 .font(.system(size: 8, weight: .bold))
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 3)
-                                .background(Capsule().fill(.blue))
+                                .background(Capsule().fill(theme.accentColor))
                                 .offset(x: 6, y: -4)
                         }
                     }

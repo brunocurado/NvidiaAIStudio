@@ -117,8 +117,11 @@ final class MCPConnection: Identifiable {
     private var inputPipe: Pipe?
     private var outputPipe: Pipe?
     private var pendingRequests: [Int: CheckedContinuation<Any, Error>] = [:]
+    private let pendingRequestsLock = NSLock()
     private var requestID = 0
-    private var buffer = ""
+    private var jsonBuffer = ""
+    private var lineBuffer = Data()
+    private let lineBufferLock = NSLock()
 
     // SSE transport state
     private var sseTask: Task<Void, Never>?
@@ -146,7 +149,9 @@ final class MCPConnection: Identifiable {
         } catch {
             await MainActor.run {
                 status = .failed(error.localizedDescription)
-                lastError = error.localizedDescription
+                if lastError == nil || !(lastError?.hasPrefix("RAW:") ?? false) {
+                    lastError = error.localizedDescription
+                }
             }
         }
     }
@@ -176,10 +181,12 @@ final class MCPConnection: Identifiable {
         let existingPath = environment["PATH"] ?? "/usr/bin:/bin"
         environment["PATH"] = "\(nodeBinDir):/usr/local/bin:/opt/homebrew/bin:\(existingPath)"
         // Also set NODE_PATH for npx module resolution
-        let nodeBase = URL(fileURLWithPath: nodeBinDir).deletingLastPathComponent().path
-        environment["NODE_PATH"] = "\(nodeBase)/lib/node_modules"
+        // Removed NODE_PATH override as it breaks global resolution in nvm
         for (k, v) in env { environment[k] = v }
         p.environment = environment
+
+        // Set CWD to user's home directory so servers can write local DB files (e.g. Memory)
+        p.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
 
         let inPipe = Pipe()
         let outPipe = Pipe()
@@ -189,23 +196,54 @@ final class MCPConnection: Identifiable {
         p.standardError = errPipe
 
         try p.run()
+
         self.process = p
         self.inputPipe = inPipe
         self.outputPipe = outPipe
 
         // Capture stderr for error diagnostics
         Task { [weak self] in
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            if let errText = String(data: data, encoding: .utf8), !errText.isEmpty {
-                let trimmed = errText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if let strongSelf = self {
-                    await MainActor.run { strongSelf.lastError = trimmed }
+            do {
+                for try await line in errPipe.fileHandleForReading.bytes.lines {
+                    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty, let strongSelf = self {
+                        Task { @MainActor in 
+                            if strongSelf.lastError == nil {
+                                strongSelf.lastError = trimmed 
+                            }
+                        }
+                    }
                 }
+            } catch {
+                // Ignore errors from stderr stream
             }
         }
 
-        // Start reading output in background
-        Task { [weak self] in await self?.readStdioOutput() }
+        // Start reading output via GCD readabilityHandler (more reliable than AsyncBytes for pipes)
+        outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty, let self else {
+                handle.readabilityHandler = nil
+                return
+            }
+            self.lineBufferLock.withLock {
+                self.lineBuffer.append(chunk)
+            }
+            // Process complete lines (under lock to prevent concurrent access)
+            while true {
+                let lineData: Data? = self.lineBufferLock.withLock {
+                    guard let newlineRange = self.lineBuffer.range(of: Data([0x0A])) else { return nil }
+                    let data = self.lineBuffer.subdata(in: self.lineBuffer.startIndex..<newlineRange.lowerBound)
+                    self.lineBuffer.removeSubrange(self.lineBuffer.startIndex...newlineRange.lowerBound)
+                    return data
+                }
+                guard let lineData else { break }
+                if let lineStr = String(data: lineData, encoding: .utf8) {
+                    let trimmed = lineStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty { self.handleLine(trimmed) }
+                }
+            }
+        }
     }
 
     private func resolveCommand(_ cmd: String) -> String {
@@ -214,45 +252,51 @@ final class MCPConnection: Identifiable {
             return cmd
         }
         // Otherwise search common locations for short names (npx, node, python, etc.)
+        let userHome = FileManager.default.homeDirectoryForCurrentUser.path
         let candidates = [
+            "\(userHome)/.nvm/versions/node/v22.21.1/bin/\(cmd)",
+            "\(userHome)/.nvm/current/bin/\(cmd)",
             "/opt/homebrew/bin/\(cmd)",
             "/usr/local/bin/\(cmd)",
             "/usr/bin/\(cmd)",
-            "/Users/mac/.nvm/versions/node/v22.21.1/bin/\(cmd)",
             cmd
         ]
         return candidates.first { FileManager.default.fileExists(atPath: $0) } ?? cmd
     }
 
-    private func readStdioOutput() async {
-        guard let outPipe = outputPipe else { return }
-        let handle = outPipe.fileHandleForReading
-        while case let data = handle.availableData, !data.isEmpty {
-            if let text = String(data: data, encoding: .utf8) {
-                buffer += text
-                processBuffer()
-            }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-    }
-
-    private func processBuffer() {
-        // MCP uses newline-delimited JSON
-        while let newlineRange = buffer.range(of: "\n") {
-            let line = String(buffer[buffer.startIndex..<newlineRange.lowerBound])
-            buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
-            handleLine(line.trimmingCharacters(in: .whitespaces))
-        }
-    }
 
     private func handleLine(_ line: String) {
-        guard !line.isEmpty,
-              let data = line.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
+        guard !line.isEmpty else { return }
 
-        let id = json["id"] as? Int ?? -1
-        if let continuation = pendingRequests.removeValue(forKey: id) {
+        // Accumulate lines until we have a complete JSON object
+        if line.starts(with: "{") && jsonBuffer.isEmpty {
+            jsonBuffer = line
+        } else if !jsonBuffer.isEmpty {
+            jsonBuffer += "\n" + line
+        } else {
+            return // Non-JSON stderr noise, ignore
+        }
+
+        guard let data = jsonBuffer.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return // Incomplete JSON, wait for next chunk
+        }
+
+        jsonBuffer = ""
+
+        var id = -1
+        if let intId = json["id"] as? Int {
+            id = intId
+        } else if let strId = json["id"] as? String, let parsedId = Int(strId) {
+            id = parsedId
+        }
+
+        let continuation = pendingRequestsLock.withLock {
+            pendingRequests.removeValue(forKey: id)
+        }
+
+        if let continuation = continuation {
             if let error = json["error"] as? [String: Any] {
                 let msg = error["message"] as? String ?? "MCP error"
                 continuation.resume(throwing: SkillError.executionFailed(msg))
@@ -290,21 +334,39 @@ final class MCPConnection: Identifiable {
             "method": method,
             "params": params
         ]
+        
         let data = try JSONSerialization.data(withJSONObject: message)
         guard let line = String(data: data, encoding: .utf8) else {
             throw SkillError.executionFailed("Failed to encode request")
         }
 
-        return try await withCheckedThrowingContinuation { cont in
-            pendingRequests[id] = cont
-            let payload = (line + "\n").data(using: .utf8)!
-            inputPipe?.fileHandleForWriting.write(payload)
-            // Timeout after 120s (npx may need time to download on first run)
-            Task {
-                try? await Task.sleep(for: .seconds(120))
-                if let cont = self.pendingRequests.removeValue(forKey: id) {
-                    cont.resume(throwing: SkillError.executionFailed("MCP request timed out"))
+        return try await withTaskCancellationHandler {
+            return try await withCheckedThrowingContinuation { cont in
+                pendingRequestsLock.withLock {
+                    pendingRequests[id] = cont
                 }
+                
+                let payload = (line + "\n").data(using: .utf8)!
+                inputPipe?.fileHandleForWriting.write(payload)
+                // Timeout after 120s (npx may need time to download on first run)
+                Task {
+                    try? await Task.sleep(for: .seconds(120))
+                    
+                    let removed = pendingRequestsLock.withLock {
+                        self.pendingRequests.removeValue(forKey: id)
+                    }
+                    
+                    if let cont = removed {
+                        cont.resume(throwing: SkillError.executionFailed("MCP request timed out"))
+                    }
+                }
+            }
+        } onCancel: {
+            let removed = pendingRequestsLock.withLock {
+                self.pendingRequests.removeValue(forKey: id)
+            }
+            if let cont = removed {
+                cont.resume(throwing: CancellationError())
             }
         }
     }
@@ -333,7 +395,18 @@ final class MCPConnection: Identifiable {
     }
 
     func callTool(name: String, arguments: String) async throws -> String {
-        let args = (try? JSONSerialization.jsonObject(with: arguments.data(using: .utf8) ?? Data())) ?? [:]
+        var args = (try? JSONSerialization.jsonObject(with: arguments.data(using: .utf8) ?? Data())) as? [String: Any] ?? [:]
+        
+        // Auto-fix common LLM hallucinated arguments for standard MCP file tools
+        if name == "read_file" || name == "write_file" || name == "edit_file" {
+            if args["path"] == nil {
+                if let fp = args["file_path"] { args["path"] = fp }
+                else if let fp = args["filename"] { args["path"] = fp }
+                else if let fp = args["file"] { args["path"] = fp }
+                else if let fp = args["raw_input"] { args["path"] = fp }
+            }
+        }
+        
         let result = try await sendRequest(method: "tools/call", params: [
             "name": name,
             "arguments": args
@@ -380,6 +453,26 @@ final class MCPManager {
         serverConfigs.append(config)
         saveConfigs()
         if config.isEnabled { Task { await connectServer(config) } }
+    }
+
+    @MainActor
+    func updateServer(_ config: MCPServerConfig) {
+        if let idx = serverConfigs.firstIndex(where: { $0.id == config.id }) {
+            let wasEnabled = serverConfigs[idx].isEnabled
+            serverConfigs[idx] = config
+            saveConfigs()
+            
+            // Reconnect if it was enabled
+            if wasEnabled || config.isEnabled {
+                connections.first { $0.id == config.id }?.disconnect()
+                connections.removeAll { $0.id == config.id }
+                if config.isEnabled {
+                    Task { await connectServer(config) }
+                } else {
+                    syncSkills()
+                }
+            }
+        }
     }
 
     @MainActor

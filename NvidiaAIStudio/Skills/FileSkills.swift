@@ -244,6 +244,10 @@ struct RunCommandSkill: Skill {
                 "working_directory": [
                     "type": "string",
                     "description": "Optional: working directory for the command"
+                ] as [String: Any],
+                "run_in_background": [
+                    "type": "boolean",
+                    "description": "Optional: set to true ONLY for long running tasks like dev servers (npm start, swift run). Output will be streamed to the visual PTY."
                 ] as [String: Any]
             ] as [String: Any],
             "required": ["command"]
@@ -254,6 +258,7 @@ struct RunCommandSkill: Skill {
         let args = try SkillArgs.parse(arguments)
         let command = try SkillArgs.getString(args, key: "command")
         let workDir = SkillArgs.getOptionalString(args, key: "working_directory")
+        let runInBackground = SkillArgs.getBool(args, key: "run_in_background", defaultValue: false)
         
         // Safety: block dangerous commands
         let blocked = ["rm -rf /", "rm -rf /*", "mkfs", "dd if=", "> /dev/sda"]
@@ -267,6 +272,14 @@ struct RunCommandSkill: Skill {
         if let dir = workDir {
             let expanded = NSString(string: dir).expandingTildeInPath
             cmd = "cd '\(expanded)' && \(command)"
+        }
+        
+        if runInBackground {
+            let finalCmd = cmd
+            await MainActor.run {
+                PTYManager.shared.write("\(finalCmd)\n")
+            }
+            return "Command '\(command)' dispatched to the visual PTY terminal successfully. It is now running in the background."
         }
         
         cmd = "\(cmd) 2>&1"

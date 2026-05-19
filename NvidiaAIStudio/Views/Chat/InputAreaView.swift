@@ -9,6 +9,7 @@ struct InputAreaView: View {
     @State private var inputText = ""
     @State private var pendingAttachments: [Message.Attachment] = []
     @State private var editorHeight: CGFloat = 22
+    @State private var showModelPopover = false
     @FocusState private var isFocused: Bool
     
     var body: some View {
@@ -119,20 +120,9 @@ struct InputAreaView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
 
-                // Model picker — filtered to active provider
-                Menu {
-                    ForEach(appState.modelsForActiveProvider.filter(\.isEnabled)) { model in
-                        Button {
-                            appState.selectedModelID = model.id
-                        } label: {
-                            HStack {
-                                Text(model.name)
-                                if model.id == appState.selectedModelID {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    }
+                // Model picker — Searchable Popover
+                Button {
+                    showModelPopover.toggle()
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "cpu.fill")
@@ -144,8 +134,11 @@ struct InputAreaView: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-                .menuStyle(.borderlessButton)
+                .buttonStyle(.borderless)
                 .fixedSize()
+                .popover(isPresented: $showModelPopover, arrowEdge: .top) {
+                    SearchableModelPicker(isPresented: $showModelPopover)
+                }
                 
                 // Reasoning level
                 if appState.selectedModel?.supportsThinking == true {
@@ -253,16 +246,18 @@ struct InputAreaView: View {
                 }
                 
                 // Context usage ring
+                let currentMax = appState.selectedModel?.contextWindow ?? viewModel.maxTokens
+                let currentUsage = currentMax > 0 ? Double(viewModel.estimatedTokenCount) / Double(currentMax) : 0
                 ContextIndicatorView(
-                    usage: viewModel.contextUsage,
+                    usage: currentUsage,
                     estimatedTokenCount: viewModel.estimatedTokenCount,
-                    maxTokens: viewModel.maxTokens
+                    maxTokens: currentMax
                 )
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+        .macGlassTile(cornerRadius: 20)
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
@@ -459,7 +454,7 @@ struct AttachmentPreview: View {
                 }
                 .foregroundStyle(.secondary)
                 .frame(width: 60, height: 60)
-                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 8))
             }
             
             // Remove button
@@ -626,7 +621,7 @@ struct ContextIndicatorView: View {
         } label: {
             ZStack {
                 Circle()
-                    .stroke(.white.opacity(0.1), lineWidth: 2.5)
+                    .stroke(Color.primary.opacity(0.1), lineWidth: 2.5)
                 
                 Circle()
                     .trim(from: 0, to: usage)
@@ -676,3 +671,71 @@ struct ContextIndicatorView: View {
         return "\(n)"
     }
 }
+
+/// A searchable popover list for selecting models, handling providers with hundreds of models like OpenRouter.
+struct SearchableModelPicker: View {
+    @Environment(AppState.self) private var appState
+    @Binding var isPresented: Bool
+    @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
+    
+    var body: some View {
+        let models = appState.modelsForActiveProvider.filter(\.isEnabled)
+        let filtered = searchText.isEmpty ? models : models.filter { $0.name.localizedCaseInsensitiveContains(searchText) || $0.id.localizedCaseInsensitiveContains(searchText) }
+        
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search models...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .focused($isSearchFocused)
+                if !searchText.isEmpty {
+                    Button(action: { searchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
+            .background(GlassTheme.flatFill)
+            
+            Divider()
+            
+            if filtered.isEmpty {
+                Spacer()
+                Text("No models match your search.")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Spacer()
+            } else {
+                List(filtered) { model in
+                    Button {
+                        appState.selectedModelID = model.id
+                        isPresented = false
+                    } label: {
+                        HStack {
+                            Text(model.name)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer()
+                            if model.id == appState.selectedModelID {
+                                Image(systemName: "checkmark").foregroundStyle(.blue)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listStyle(.sidebar)
+            }
+        }
+        .frame(minWidth: 360, minHeight: 400)
+        .onAppear {
+            isSearchFocused = true
+        }
+    }
+}
+

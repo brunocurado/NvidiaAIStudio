@@ -60,15 +60,14 @@ mkdir -p "${RESOURCES_DIR}"
 # 3. Copy binary
 cp "${BINARY_PATH}" "${MACOS_DIR}/${PRODUCT_NAME}"
 
-# 4. Copy Resources (.env for API keys, AppIcon.icns for the app icon, PromptMaster)
+# 4. Copy Resources (.env for API keys, AppIcon.icns, avatars, PromptMaster, all assets)
 if [ -f ".env" ]; then
     cp ".env" "${RESOURCES_DIR}/.env"
 fi
-if [ -f "NvidiaAIStudio/Resources/AppIcon.icns" ]; then
-    cp "NvidiaAIStudio/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
-fi
-if [ -d "NvidiaAIStudio/Resources/PromptMaster" ]; then
-    cp -R "NvidiaAIStudio/Resources/PromptMaster" "${RESOURCES_DIR}/PromptMaster"
+
+if [ -d "NvidiaAIStudio/Resources" ]; then
+    # Copy all resources including avatars and PromptMaster to the app bundle
+    cp -R NvidiaAIStudio/Resources/* "${RESOURCES_DIR}/"
 fi
 
 # 5. Create Info.plist

@@ -20,22 +20,40 @@ final class ChatViewModel {
             let _ = appState.createSession(title: String(text.prefix(40)))
         }
         let userMessage = Message(role: .user, content: text, attachments: attachments)
+
+        // FIX (v2.5.5): Pre-allocate the assistant placeholder in the SAME state
+        // update as the user message. This eliminates the "enter flash" glitch caused
+        // by the gap between user message insertion and the placeholder creation
+        // (which previously happened inside agentLoop after validation work).
+        let streamingID = UUID()
+        let placeholder = Message(id: streamingID, role: .assistant, content: "", isStreaming: true)
+
         appState.mutateActiveSession { session in
             session.messages.append(userMessage)
+            session.messages.append(placeholder)
             session.updatedAt = Date()
-            if session.messages.count == 1 {
+            if session.messages.count == 2 {
                 session.title = String(text.prefix(50))
             }
         }
-        guard let apiKey = appState.activeAPIKey ?? EnvParser.loadNVIDIAKey() else {
-            let errorMsg = Message(role: .assistant, content: "⚠️ No API key configured.\n\nGo to **Settings → API Keys** to add your NVIDIA NIM key, or place it in a `.env` file:\n```\nNVIDIA_NIM_API_KEY=nvapi-...\n```")
+
+        let providerKey = appState.activeAPIKey
+        guard let apiKey = providerKey ?? (appState.activeProvider == .nvidia ? EnvParser.loadNVIDIAKey() : nil) else {
+            appState.mutateActiveSession { session in
+                session.messages.removeAll { $0.id == streamingID }
+            }
+            let errorMsg = Message(role: .assistant, content: "⚠️ No API key configured for \(appState.activeProvider.rawValue).\n\nGo to **Settings → API Keys** to add your key.")
             appState.mutateActiveSession { $0.messages.append(errorMsg) }
             return
         }
         guard let model = appState.selectedModel else {
+            appState.mutateActiveSession { session in
+                session.messages.removeAll { $0.id == streamingID }
+            }
             appState.showToast("No model selected", level: .error)
             return
         }
+
         isStreaming = true
         let service = ProviderServiceFactory.make(
             provider: appState.activeProvider,
@@ -45,7 +63,7 @@ final class ChatViewModel {
         let tools = skillRegistry.toolDefinitions
         streamTask = Task { [weak self] in
             guard let self else { return }
-            await self.agentLoop(service: service, model: model, tools: tools, appState: appState, reasoningLevel: appState.reasoningLevel)
+            await self.agentLoop(streamingID: streamingID, service: service, model: model, tools: tools, appState: appState, reasoningLevel: appState.reasoningLevel)
         }
     }
     
@@ -59,54 +77,95 @@ final class ChatViewModel {
     // MARK: - Agent Loop
     
     private func agentLoop(
+        streamingID: UUID,
         service: any AIProvider,
         model: AIModel,
         tools: [[String: Any]],
         appState: AppState,
         reasoningLevel: ReasoningLevel
     ) async {
-        let maxIterations = 10
+        let maxIterations = 50
         
         for _ in 0..<maxIterations {
             if Task.isCancelled { break }
             
-            let streamingID = UUID()
+            // streamingID comes from sendMessage (pre-allocated placeholder)
+            // except on subsequent iterations where we keep reusing it
             
             // Collect messages to send BEFORE inserting the placeholder
             let messagesToSend = await MainActor.run {
-                // Build system prompt with optional Knowledge Base context
-                let lastUserMsg = appState.activeSession?.messages.last(where: { $0.role == .user })?.content ?? ""
-                let knowledgeContext = appState.knowledgeManager.buildContext(query: lastUserMsg)
-                let systemContent = SystemPrompt.defaultCoding + knowledgeContext
-                
+                // Build system prompt (Knowledge Base is now accessed via the search_knowledge_base skill)
+                let systemContent = SystemPrompt.defaultCoding
                 var msgs = [SystemPrompt.asMessage(systemContent)]
                 
-                // If Knowledge Base has relevant PDF page images, attach them
-                let knowledgeImages = appState.knowledgeManager.buildImageAttachments(query: lastUserMsg)
+                // Use the model's defined context window
+                let resolvedMaxTokens = model.contextWindow
                 
-                msgs += (appState.activeSession?.messages ?? [])
-                    .filter { !$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil }
+                // Context Manager: Tool Output Pruning
+                let history = appState.activeSession?.messages ?? []
+                let totalMessages = history.count
+                var prunedHistory: [Message] = []
                 
-                // Attach knowledge images to the last user message if vision is available
-                if !knowledgeImages.isEmpty, model.supportsVision,
-                   let lastIdx = msgs.lastIndex(where: { $0.role == .user }) {
-                    msgs[lastIdx] = Message(
-                        id: msgs[lastIdx].id,
-                        role: .user,
-                        content: msgs[lastIdx].content,
-                        attachments: msgs[lastIdx].attachments + knowledgeImages,
-                        timestamp: msgs[lastIdx].timestamp
-                    )
+                for (index, msg) in history.enumerated() {
+                    var finalMsg = msg
+                    let turnAge = totalMessages - index
+                    
+                    // If a tool output is older than ~6 messages and is huge (e.g. source code), truncate it!
+                    if finalMsg.role == .tool && finalMsg.content.count > 1500 && turnAge > 6 {
+                        finalMsg.content = "[Context Manager Note: The raw output of this tool (\(finalMsg.content.count) bytes) was truncated to preserve Context Window limits because it exceeds an age of 6 turns. The agent can confidently assume it successfully executed this tool in the past. If the agent needs to re-read the exact content, it must invoke the tool again.]"
+                    }
+                    prunedHistory.append(finalMsg)
                 }
+                
+                msgs += prunedHistory.filter { !$0.content.isEmpty || $0.role == .system || $0.role == .tool || $0.toolCalls != nil }
+                
+                // Token Estimation - Feature #2
+                let tokenCount = TokenEstimator.estimateSession(msgs)
+                self.estimatedTokenCount = tokenCount
+                self.maxTokens = resolvedMaxTokens
+                self.contextUsage = Double(tokenCount) / Double(resolvedMaxTokens)
+                
+                // Auto-Compaction threshold check - Feature #3
+                if self.contextUsage > 0.8 {
+                    var compactMsgs: [Message] = []
+                    for (i, m) in msgs.enumerated() {
+                        var compact = m
+                        if i < msgs.count - 10 && m.role != .system {
+                            if m.content.count > 500 {
+                                compact.content = "[Compacted turn (Older than 10 turns) - Content cleared due to reaching 80% Context window payload]"
+                            }
+                        }
+                        compactMsgs.append(compact)
+                    }
+                    msgs = compactMsgs
+                    self.contextUsage -= 0.2 // Fake update for UI
+                    Task { @MainActor in
+                        appState.showToast("Context hit 80%. Pruning history.", level: .warning)
+                    }
+                }
+                
+                // (Vision attachments from KB are now handled selectively by the tool or disabled to save tokens)
                 
                 return self.sanitizeMessages(msgs)
             }
             
-            // Insert placeholder message IMMEDIATELY — keeps LazyVStack layout stable
+            // Placeholder was pre-allocated in sendMessage (first iteration).
+            // On subsequent iterations (after tool-use), just re-activate streaming.
             await MainActor.run {
                 self.streamingStatus = model.supportsThinking ? "Thinking" : "Generating"
-                appState.mutateActiveSession {
-                    $0.messages.append(Message(id: streamingID, role: .assistant, content: "", isStreaming: true))
+                // Check if our placeholder already exists from sendMessage
+                let placeholderExists = appState.activeSession?.messages.contains { $0.id == streamingID } ?? false
+                if !placeholderExists {
+                    // Re-insert placeholder for second+ iteration (tool response loop)
+                    appState.mutateActiveSession {
+                        $0.messages.append(Message(id: streamingID, role: .assistant, content: "", isStreaming: true))
+                    }
+                } else {
+                    // Re-activate streaming on existing placeholder
+                    if let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
+                       let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == streamingID }) {
+                        appState.sessions[si].messages[mi].isStreaming = true
+                    }
                 }
             }
             
@@ -114,6 +173,7 @@ final class ChatViewModel {
             var accReasoning: String? = nil
             var accToolCalls: [Message.ToolCall]? = nil
             var accUsage: TokenUsage? = nil
+            var accFinishReason: String? = nil
             
             do {
                 let stream = service.chat(messages: messagesToSend, model: model, tools: tools.isEmpty ? nil : tools, reasoningLevel: reasoningLevel)
@@ -128,6 +188,7 @@ final class ChatViewModel {
                     if let c = chunk.content { accContent += c; await MainActor.run { self.streamingStatus = "Writing" } }
                     if let tc = chunk.toolCalls { accToolCalls = tc; await MainActor.run { self.streamingStatus = "Running tools" } }
                     if let u = chunk.usage { accUsage = u }
+                    if let fr = chunk.finishReason { accFinishReason = fr }
                     
                     // Throttle UI updates to ~6/sec (every 150ms)
                     let now = ContinuousClock.now
@@ -160,63 +221,112 @@ final class ChatViewModel {
                 }
                 
                 // Finalize: mark message as no longer streaming
-                let finalContent = accContent
+                var finalContent = accContent
                 let finalReasoning = accReasoning
-                let finalToolCalls = accToolCalls
+                var extractedToolCalls = accToolCalls ?? []
+                
+                // DeepSeek V4-Pro/Claude XML Tool Call Parser
+                let pattern = "<tool_call\\s+name=\"([^\"]+)\">\\s*(.*?)\\s*</tool_call>"
+                if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) {
+                    let nsString = finalContent as NSString
+                    let matches = regex.matches(in: finalContent, range: NSRange(location: 0, length: nsString.length))
+                    
+                    for match in matches.reversed() {
+                        if match.numberOfRanges == 3 {
+                            let name = nsString.substring(with: match.range(at: 1))
+                            let arguments = nsString.substring(with: match.range(at: 2))
+                            let id = "xml_call_" + UUID().uuidString.prefix(8)
+                            extractedToolCalls.append(Message.ToolCall(id: String(id), name: name, arguments: arguments, status: .pending))
+                            finalContent = (finalContent as NSString).replacingCharacters(in: match.range, with: "")
+                        }
+                    }
+                }
+                
+                // DeepSeek V4 Flash DSML Tool Call Parser
+                let dsmlPattern = "<(?:｜|\\|)DSML(?:｜|\\|)invoke\\s+name=\"([^\"]+)\">\\s*(.*?)\\s*</(?:｜|\\|)DSML(?:｜|\\|)invoke>"
+                if let dsmlRegex = try? NSRegularExpression(pattern: dsmlPattern, options: [.dotMatchesLineSeparators]) {
+                    let nsString = finalContent as NSString
+                    let matches = dsmlRegex.matches(in: finalContent, range: NSRange(location: 0, length: nsString.length))
+                    
+                    for match in matches.reversed() {
+                        if match.numberOfRanges == 3 {
+                            let name = nsString.substring(with: match.range(at: 1))
+                            let innerContent = nsString.substring(with: match.range(at: 2))
+                            var argsDict: [String: String] = [:]
+                            
+                            let paramPattern = "<(?:｜|\\|)DSML(?:｜|\\|)parameter\\s+name=\"([^\"]+)\"[^>]*>([\\s\\S]*?)</(?:｜|\\|)DSML(?:｜|\\|)parameter>"
+                            if let paramRegex = try? NSRegularExpression(pattern: paramPattern, options: [.dotMatchesLineSeparators]) {
+                                let innerNSString = innerContent as NSString
+                                let paramMatches = paramRegex.matches(in: innerContent, range: NSRange(location: 0, length: innerNSString.length))
+                                for pMatch in paramMatches {
+                                    if pMatch.numberOfRanges == 3 {
+                                        let pName = innerNSString.substring(with: pMatch.range(at: 1))
+                                        let pValue = innerNSString.substring(with: pMatch.range(at: 2))
+                                        argsDict[pName] = pValue
+                                    }
+                                }
+                            }
+                            
+                            let arguments = (try? String(data: JSONEncoder().encode(argsDict), encoding: .utf8)) ?? "{}"
+                            let id = "dsml_call_" + UUID().uuidString.prefix(8)
+                            extractedToolCalls.append(Message.ToolCall(id: String(id), name: name, arguments: arguments, status: .pending))
+                            
+                            finalContent = (finalContent as NSString).replacingCharacters(in: match.range, with: "")
+                        }
+                    }
+                }
+                
+                // Clean up remaining DSML wrapper tags if any
+                finalContent = finalContent.replacingOccurrences(of: "<｜DSML｜tool_calls>", with: "").replacingOccurrences(of: "</｜DSML｜tool_calls>", with: "")
+                finalContent = finalContent.replacingOccurrences(of: "<|DSML|tool_calls>", with: "").replacingOccurrences(of: "</|DSML|tool_calls>", with: "")
+                
+                finalContent = finalContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                let finalToolCalls = extractedToolCalls.isEmpty ? nil : extractedToolCalls
+                
                 await MainActor.run {
                     self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: finalContent, reasoning: finalReasoning, toolCalls: finalToolCalls, isStreaming: false), in: appState)
                 }
                 
-                if let toolCalls = accToolCalls, !toolCalls.isEmpty {
-                    await MainActor.run { self.streamingStatus = "Executing tools (\(toolCalls.count))" }
-                    
-                    for toolCall in toolCalls {
-                        // Add status badge before execution
-                        await MainActor.run {
-                            let badgeText = self.badgeTextForTool(toolCall)
-                            let badgeIcon = self.iconForTool(toolCall.name)
-                            if let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
-                               let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == streamingID }) {
-                                appState.sessions[si].messages[mi].statusBadges.append(
-                                    Message.StatusBadge(text: badgeText, icon: badgeIcon)
-                                )
-                            }
-                            self.updateToolCallStatus(messageID: streamingID, toolCallID: toolCall.id, status: .running, in: appState)
-                        }
-                        let accessLevel = await MainActor.run { appState.fileAccessLevel }
-                        let workspacePath = await MainActor.run { appState.activeWorkspacePath }
-                        let supportsVision = await MainActor.run { appState.selectedModel?.supportsVision ?? false }
-                        
-                        let rawResult: String
-                        do {
-                            rawResult = try await skillRegistry.execute(name: toolCall.name, arguments: toolCall.arguments, accessLevel: accessLevel, workspacePath: workspacePath)
-                            await MainActor.run {
-                                self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .completed, in: appState)
-                                // Auto-refresh diff panel when file tools complete
-                                if ["write_file", "edit_file", "replace_file"].contains(toolCall.name) {
-                                    NotificationCenter.default.post(name: .diffShouldRefresh, object: nil)
-                                }
-                            }
-                        } catch {
-                            rawResult = "Error: \(error.localizedDescription)"
-                            await MainActor.run {
-                                self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .failed, in: appState)
-                            }
-                        }
-                        
-                        // Detect vision payload from fetch_images skill
-                        let (textContent, imageAttachments) = extractVisionPayload(from: rawResult, supportsVision: supportsVision)
-                        
-                        await MainActor.run {
-                            let toolResultMessage = Message(
-                                role: .tool,
-                                content: textContent,
-                                attachments: imageAttachments,
-                                toolCallId: toolCall.id
-                            )
-                            appState.mutateActiveSession { $0.messages.append(toolResultMessage) }
+                // Query Loop Recovery - Feature #1
+                // If model output hit the maximum length limit, we prompt it to seamlessly continue.
+                if accFinishReason == "length" || accFinishReason == "max_tokens" {
+                    await MainActor.run {
+                        appState.mutateActiveSession { session in
+                            session.messages.append(Message(role: .user, content: "[System: Your response was truncated due to output length constraints. Please continue exactly where you left off without any preamble or apology, just resume code or text.]"))
                         }
                     }
+                    // Loop again seamlessly!
+                    continue
+                }
+                
+                if let toolCalls = finalToolCalls, !toolCalls.isEmpty {
+                    await MainActor.run { self.streamingStatus = "Executing tools (\(toolCalls.count))" }
+                    
+                    let readOnlyTools = ["list_dir", "read_file", "view_file", "search", "grep_search", "search_web", "semantic_search", "fetch_images", "run_git"]
+                    var concurrentCalls: [Message.ToolCall] = []
+                    var serialCalls: [Message.ToolCall] = []
+                    
+                    for tc in toolCalls {
+                        if readOnlyTools.contains(tc.name) { concurrentCalls.append(tc) }
+                        else { serialCalls.append(tc) }
+                    }
+                    
+                    // Concurrent Group
+                    if !concurrentCalls.isEmpty {
+                        await withTaskGroup(of: Void.self) { group in
+                            for toolCall in concurrentCalls {
+                                group.addTask {
+                                    await self.executeSingleTool(toolCall, streamingID: streamingID, appState: appState)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Serial Group
+                    for toolCall in serialCalls {
+                        await self.executeSingleTool(toolCall, streamingID: streamingID, appState: appState)
+                    }
+                    
                     continue
                 }
                 
@@ -253,9 +363,10 @@ final class ChatViewModel {
                         .components(separatedBy: "—").first?.trimmingCharacters(in: .whitespaces) ?? model.name
                     AppNotifications.sendResponseCompleted(modelName: cleanName)
                 }
-                return
                 
-            } catch is CancellationError {
+                return
+            } catch let error as CancellationError {
+                _ = error
                 await MainActor.run {
                     self.isStreaming = false
                     appState.mutateActiveSession { session in
@@ -338,11 +449,17 @@ final class ChatViewModel {
         var result: [Message] = []
         
         for msg in messages {
-            // Rule 1: tool must follow assistant with toolCalls
+            // Rule 1: tool must follow assistant with toolCalls or another tool message
             if msg.role == .tool {
-                guard let prev = result.last, prev.role == .assistant, prev.toolCalls != nil else {
-                    continue
+                var valid = false
+                if let prev = result.last {
+                    if prev.role == .assistant && prev.toolCalls != nil {
+                        valid = true
+                    } else if prev.role == .tool {
+                        valid = true // Allow consecutive tool results
+                    }
                 }
+                guard valid else { continue }
             }
             // Rule 2: Merge consecutive same-role messages (except tool)
             if let prev = result.last, prev.role == msg.role, msg.role != .tool {
@@ -433,7 +550,7 @@ final class ChatViewModel {
     func compressContext(appState: AppState) async {
         guard let session = appState.activeSession,
               let model = appState.selectedModel,
-              let apiKey = appState.activeAPIKey ?? EnvParser.loadNVIDIAKey() else { return }
+              let apiKey = appState.activeAPIKey ?? (appState.activeProvider == .nvidia ? EnvParser.loadNVIDIAKey() : nil) else { return }
         let messages = session.messages
         let keepLast = 6
         guard messages.count > keepLast + 2 else { return }
@@ -526,5 +643,76 @@ final class ChatViewModel {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         return json["command"] as? String
+    }
+    
+    // MARK: - Extracted Concurrent Tool Execution
+    private func executeSingleTool(_ toolCall: Message.ToolCall, streamingID: UUID, appState: AppState) async {
+        await MainActor.run {
+            let badgeText = self.badgeTextForTool(toolCall)
+            let badgeIcon = self.iconForTool(toolCall.name)
+            if let si = appState.sessions.firstIndex(where: { $0.id == appState.activeSessionID }),
+               let mi = appState.sessions[si].messages.firstIndex(where: { $0.id == streamingID }) {
+                appState.sessions[si].messages[mi].statusBadges.append(
+                    Message.StatusBadge(text: badgeText, icon: badgeIcon)
+                )
+            }
+            self.updateToolCallStatus(messageID: streamingID, toolCallID: toolCall.id, status: .running, in: appState)
+        }
+        
+        let accessLevel = await MainActor.run { appState.fileAccessLevel }
+        let workspacePath = await MainActor.run { appState.activeWorkspacePath }
+        let supportsVision = await MainActor.run { appState.selectedModel?.supportsVision ?? false }
+        
+        let rawResult: String
+        do {
+            let result = try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    return try await self.skillRegistry.execute(name: toolCall.name, arguments: toolCall.arguments, accessLevel: accessLevel, workspacePath: workspacePath)
+                }
+                group.addTask {
+                    try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds timeout
+                    throw CancellationError()
+                }
+                let first = try await group.next()!
+                group.cancelAll()
+                return first
+            }
+            
+            // UI & Memory Protection: Truncate massively oversized tool outputs
+            if result.count > 100_000 {
+                rawResult = String(result.prefix(100_000)) + "\n\n... [TRUNCATED: The output exceeded 100,000 characters and was truncated to protect application memory. This usually happens when listing a massive directory. Please use `run_command` with constraints (e.g. find . -maxdepth 2) instead.]"
+            } else {
+                rawResult = result
+            }
+            
+            await MainActor.run {
+                self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .completed, in: appState)
+                if ["write_file", "edit_file", "replace_file"].contains(toolCall.name) {
+                    NotificationCenter.default.post(name: .diffShouldRefresh, object: nil)
+                }
+            }
+        } catch is CancellationError {
+            rawResult = "Error: Tool execution timed out after 30 seconds. The operation took too long (this often happens when running directory trees on massive folders like node_modules). Please try a more specific command."
+            await MainActor.run {
+                self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .failed, in: appState)
+            }
+        } catch {
+            rawResult = "Error: \(error.localizedDescription)"
+            await MainActor.run {
+                self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .failed, in: appState)
+            }
+        }
+        
+        let (textContent, imageAttachments) = self.extractVisionPayload(from: rawResult, supportsVision: supportsVision)
+        
+        await MainActor.run {
+            let toolResultMessage = Message(
+                role: .tool,
+                content: textContent,
+                attachments: imageAttachments,
+                toolCallId: toolCall.id
+            )
+            appState.mutateActiveSession { $0.messages.append(toolResultMessage) }
+        }
     }
 }

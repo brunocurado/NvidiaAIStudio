@@ -97,7 +97,7 @@ struct UsagePanelView: View {
                         }
                     }
                     .padding(16)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+                    .macContentBoard(cornerRadius: 14)
 
                     // ── By Model breakdown ──
                     if !topModels.isEmpty {
@@ -117,7 +117,7 @@ struct UsagePanelView: View {
                                     Spacer()
                                     GeometryReader { geo in
                                         RoundedRectangle(cornerRadius: 3)
-                                            .fill(Color.blue.opacity(0.6))
+                                            .fill(GlassTheme.purple.opacity(0.6))
                                             .frame(
                                                 width: max(4, geo.size.width * CGFloat(entry.tokens) / CGFloat(topModels.first?.tokens ?? 1)),
                                                 height: 6
@@ -133,7 +133,7 @@ struct UsagePanelView: View {
                             }
                         }
                         .padding(16)
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+                        .macContentBoard(cornerRadius: 14)
                     }
 
                     // ── Footer note ──
@@ -188,7 +188,7 @@ private struct PillBadge: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(.white.opacity(0.08), in: Capsule())
+            .background(GlassTheme.flatFill, in: Capsule())
     }
 }
 
@@ -211,7 +211,7 @@ private struct UsageStatCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        .macContentBoard(cornerRadius: 12)
     }
 }
 
@@ -249,7 +249,7 @@ private struct UsageProgressCard: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(.white.opacity(0.1))
+                        .fill(GlassTheme.flatFill)
                         .frame(height: 6)
                     RoundedRectangle(cornerRadius: 3)
                         .fill(accentColor)
@@ -263,7 +263,7 @@ private struct UsageProgressCard: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(14)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+        .macContentBoard(cornerRadius: 12)
     }
 }
 

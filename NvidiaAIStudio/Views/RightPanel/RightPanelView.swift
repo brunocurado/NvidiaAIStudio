@@ -8,13 +8,20 @@ struct RightPanelView: View {
         VStack(spacing: 0) {
             // Tab bar
             HStack(spacing: 0) {
-                Picker("Panel", selection: Bindable(appState).rightPanelMode) {
+                HStack(spacing: 4) {
                     ForEach(RightPanelMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
+                        Button {
+                            appState.rightPanelMode = mode
+                        } label: {
+                            Text(mode.rawValue)
+                                .font(.system(size: 12, weight: .medium))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                        }
+                        .buttonStyle(.plain)
+                        .macControlPill(isSelected: appState.rightPanelMode == mode)
                     }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 200)
                 
                 Spacer()
                 
@@ -42,9 +49,22 @@ struct RightPanelView: View {
                 DiffViewerContent()
             case .terminal:
                 TerminalContent()
+            case .canvas:
+                LiveCanvasView()
             }
         }
-        .background(.ultraThinMaterial.opacity(0.6))
+        .macSidebarRail()
+        .onReceive(NotificationCenter.default.publisher(for: .devServerStarted)) { notif in
+            if let url = notif.object as? URL {
+                Task { @MainActor in
+                    appState.activeCanvasURL = url
+                    appState.rightPanelMode = .canvas
+                    if !appState.isRightPanelVisible {
+                        appState.isRightPanelVisible = true
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -114,7 +134,7 @@ struct DiffViewerContent: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -218,7 +238,7 @@ struct DiffLineView: View {
             // Content
             Text(line.content)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(line.type == .context ? Color.primary : Color.white)
+                .foregroundColor(line.type == .context ? Color.primary : GlassTheme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 8)
         }
@@ -228,10 +248,10 @@ struct DiffLineView: View {
     
     private var lineBackground: Color {
         switch line.type {
-        case .addition: return .green.opacity(0.15)
-        case .deletion: return .red.opacity(0.15)
+        case .addition: return GlassTheme.green.opacity(0.15)
+        case .deletion: return GlassTheme.red.opacity(0.15)
         case .context: return .clear
-        case .header: return .blue.opacity(0.1)
+        case .header: return GlassTheme.purple.opacity(0.1)
         }
     }
 }
@@ -239,7 +259,7 @@ struct DiffLineView: View {
 // MARK: - Terminal
 
 struct TerminalContent: View {
-    @State private var pty = PTYProcess()
+    @StateObject private var ptyManager = PTYManager.shared
     @State private var outputLines: [TerminalOutputLine] = []
     @State private var inputText = ""
     @State private var isConnected = false
@@ -307,14 +327,14 @@ struct TerminalContent: View {
                 
                 // Ctrl+C button
                 Button {
-                    pty.sendInterrupt()
+                    ptyManager.pty.sendInterrupt()
                 } label: {
                     Text("⌃C")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                        .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 4))
                 }
                 .buttonStyle(.plain)
                 .help("Send interrupt (Ctrl+C)")
@@ -323,11 +343,10 @@ struct TerminalContent: View {
             .padding(.vertical, 8)
         }
         .onAppear { startPTY() }
-        .onDisappear { pty.stop() }
     }
     
     private func startPTY() {
-        pty.onOutput = { text in
+        ptyManager.pty.onOutput = { text in
             // Handle native clear screen requests
             if text.contains("\u{1b}[2J") || text.contains("\u{1b}c") {
                 outputLines.removeAll()
@@ -348,7 +367,7 @@ struct TerminalContent: View {
                 outputLines.removeFirst(outputLines.count - 1500)
             }
         }
-        pty.start()
+        ptyManager.start()
         isConnected = true
     }
     
@@ -396,113 +415,11 @@ struct TerminalContent: View {
         }
         historyIndex = -1
         inputText = ""
-        pty.write(text + "\n")
+        ptyManager.write(text + "\n")
     }
 }
 
-// MARK: - PTY Process
 
-/// A real pseudo-terminal process using forkpty().
-/// Supports interactive sessions: SSH, vim, htop, zsh, etc.
-final class PTYProcess: @unchecked Sendable {
-    private var masterFD: Int32 = -1
-    private var childPID: pid_t = 0
-    private var readThread: Thread?
-    private var isRunning = false
-    
-    var onOutput: (@MainActor (String) -> Void)?
-    
-    func start(shell: String = "/bin/zsh") {
-        guard !isRunning else { return }
-        
-        var ws = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
-        
-        childPID = forkpty(&masterFD, nil, nil, &ws)
-        
-        if childPID == 0 {
-            // Child process — exec the shell
-            setenv("TERM", "xterm-256color", 1)
-            setenv("LANG", "en_US.UTF-8", 1)
-            setenv("LC_ALL", "en_US.UTF-8", 1)
-            let homeDir = NSHomeDirectory()
-            setenv("HOME", homeDir, 1)
-            _ = chdir(homeDir)
-            // Use execv with null-terminated argv array
-            let args: [UnsafeMutablePointer<CChar>?] = [
-                strdup(shell),
-                strdup("--login"),
-                nil
-            ]
-            execv(shell, args)
-            _exit(1)
-        }
-        
-        guard childPID > 0 else {
-            print("[PTYProcess] forkpty failed")
-            return
-        }
-        
-        isRunning = true
-        startReading()
-    }
-    
-    func stop() {
-        guard isRunning else { return }
-        isRunning = false
-        if masterFD >= 0 {
-            close(masterFD)
-            masterFD = -1
-        }
-        if childPID > 0 {
-            kill(childPID, SIGTERM)
-            childPID = 0
-        }
-    }
-    
-    func write(_ text: String) {
-        guard masterFD >= 0 else { return }
-        text.withCString { ptr in
-            let len = strlen(ptr)
-            _ = Darwin.write(masterFD, ptr, len)
-        }
-    }
-    
-    func sendInterrupt() {
-        // Send Ctrl+C (ETX character)
-        write("\u{03}")
-    }
-    
-    func resize(rows: Int, cols: Int) {
-        guard masterFD >= 0 else { return }
-        var ws = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
-        _ = ioctl(masterFD, TIOCSWINSZ, &ws)
-    }
-    
-    private func startReading() {
-        let fd = masterFD
-        let thread = Thread {
-            var buffer = [UInt8](repeating: 0, count: 4096)
-            while self.isRunning && fd >= 0 {
-                let bytesRead = read(fd, &buffer, buffer.count)
-                if bytesRead <= 0 { break }
-                if let str = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
-                    let output = str
-                    Task { @MainActor in
-                        self.onOutput?(output)
-                    }
-                }
-            }
-        }
-        thread.qualityOfService = .userInteractive
-        thread.name = "PTYReader"
-        thread.start()
-        readThread = thread
-    }
-    
-    deinit {
-        stop()
-    }
-}
 
 
 

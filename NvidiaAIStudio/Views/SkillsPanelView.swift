@@ -46,7 +46,7 @@ struct SkillsPanelView: View {
                 TextField("Search", text: $searchText).textFieldStyle(.plain).font(.caption)
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
+            .macContentBoard(in: Capsule())
             .padding(.horizontal)
 
             Divider().padding(.vertical, 8)
@@ -161,7 +161,7 @@ struct SkillCardView: View {
                 .lineLimit(2)
         }
         .padding(12)
-        .glassEffect(isEnabled ? .regular : .regular.tint(.white.opacity(0.02)), in: RoundedRectangle(cornerRadius: 12))
+        .macContentBoard(cornerRadius: 12)
     }
 
     private func displayName(_ name: String) -> String {

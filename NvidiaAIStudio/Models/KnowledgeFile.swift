@@ -72,11 +72,13 @@ struct KnowledgeFile: Identifiable, Codable, Equatable {
         let id: UUID
         let pageNumber: Int?
         let content: String
+        var embedding: [Double]?
         
-        init(id: UUID = UUID(), pageNumber: Int? = nil, content: String) {
+        init(id: UUID = UUID(), pageNumber: Int? = nil, content: String, embedding: [Double]? = nil) {
             self.id = id
             self.pageNumber = pageNumber
             self.content = content
+            self.embedding = embedding
         }
     }
     

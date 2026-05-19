@@ -64,7 +64,7 @@ final class NVIDIAAPIService: AIProvider {
     private let session: URLSession
     
     // Thinking keyword detection (matches Python chat_worker.py)
-    private let thinkingKeywords = ["deepseek-r1", "kimi", "qwq"]
+    private let thinkingKeywords = ["deepseek", "kimi", "qwq"]
     private let thinkingQwenSuffix = "thinking"
     
     // Models that use reasoning_effort instead of reasoning.type
@@ -179,8 +179,9 @@ final class NVIDIAAPIService: AIProvider {
         let apiMessages = messages.map { $0.toAPIDict() }
         body["messages"] = apiMessages
         
-        // Add tools if provided (Mistral supports tools + reasoning_effort simultaneously)
-        if let tools, !tools.isEmpty, reasoningLevel == .off || !supportsThinking(modelID: model.id) || usesReasoningEffort(modelID: model.id) {
+        // Add tools if provided (Mistral and DeepSeek V4-Pro support tools + reasoning simultaneously)
+        let supportsToolsAndReasoning = usesReasoningEffort(modelID: model.id) || model.id.contains("v4-pro")
+        if let tools, !tools.isEmpty, reasoningLevel == .off || !supportsThinking(modelID: model.id) || supportsToolsAndReasoning {
             body["tools"] = tools
             body["tool_choice"] = "auto"
         }
@@ -193,15 +194,27 @@ final class NVIDIAAPIService: AIProvider {
             case .low, .off: break // Mistral: omit param entirely for no reasoning
             }
         } else if supportsThinking(modelID: model.id) && reasoningLevel != .off {
-            // Qwen/DeepSeek-style: uses reasoning object with budget
-            let budget: Int
-            switch reasoningLevel {
-            case .high: budget = 10000
-            case .medium: budget = 5000
-            case .low: budget = 1024
-            case .off: budget = 0
+            if model.id.contains("v4-pro") {
+                // DeepSeek V4 reasoning uses chat_template_kwargs based on API docs
+                let thinkingValue: Any
+                switch reasoningLevel {
+                case .high: thinkingValue = "max"
+                case .medium: thinkingValue = "high"
+                case .low: thinkingValue = false
+                case .off: thinkingValue = false
+                }
+                body["chat_template_kwargs"] = ["thinking": thinkingValue]
+            } else {
+                // Qwen/DeepSeek-style: uses reasoning object with budget
+                let budget: Int
+                switch reasoningLevel {
+                case .high: budget = 10000
+                case .medium: budget = 5000
+                case .low: budget = 1024
+                case .off: budget = 0
+                }
+                body["reasoning"] = ["type": "enabled", "max_tokens": budget]
             }
-            body["reasoning"] = ["type": "enabled", "max_tokens": budget]
         }
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -245,9 +258,19 @@ final class NVIDIAAPIService: AIProvider {
             let jsonString = String(trimmed.dropFirst(6))
             
             if jsonString == "[DONE]" {
+                print("🏁 Stream finished [DONE]")
                 continuation.finish()
                 return
             }
+            
+            // -- DEBUG LOGGING --
+            if jsonString.contains("tool_calls") {
+                print("🛠️ [API DEBUG] Recebeu tool_calls oficial: \(jsonString)")
+            }
+            if jsonString.contains("<tool_call") {
+                print("⚠️ [API DEBUG] Recebeu XML <tool_call> no meio do texto: \(jsonString)")
+            }
+            // -------------------
             
             guard let jsonData = jsonString.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],

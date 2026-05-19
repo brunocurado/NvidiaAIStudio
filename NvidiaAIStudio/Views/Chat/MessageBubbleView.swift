@@ -1,10 +1,15 @@
 import SwiftUI
 import MarkdownUI
 
+// MARK: - Theme-aware helper
+
+private let _resolveTheme: (String) -> AppTheme = { AppTheme.find(id: $0) }
+
 /// A single message bubble in the chat.
 struct MessageBubbleView: View, Equatable {
     let message: Message
     @State private var showToolDetail = false
+    @AppStorage("appThemeID") private var themeID = "liquid_glass_dark"
     
     static func == (lhs: MessageBubbleView, rhs: MessageBubbleView) -> Bool {
         lhs.message.id == rhs.message.id &&
@@ -23,11 +28,11 @@ struct MessageBubbleView: View, Equatable {
                 // Assistant avatar — subtle green glow
                 ZStack {
                     Circle()
-                        .fill(.green.opacity(0.08))
+                        .fill(GlassTheme.green.opacity(0.12))
                         .frame(width: 28, height: 28)
                     Image(systemName: "cpu.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(GlassTheme.green)
                 }
                 .padding(.top, 4)
             }
@@ -43,41 +48,63 @@ struct MessageBubbleView: View, Equatable {
                 // The old logic hid the bubble when reasoning was non-empty, causing
                 // the "blank screen" bug where the user saw nothing while the model was thinking.
                 let hasContent = !message.content.isEmpty
-                let showBubble = hasContent || message.role == .user || (message.role == .assistant && message.isStreaming)
+                let hasToolCalls = !(message.toolCalls ?? []).isEmpty
+                let showBubble = hasContent || message.role == .user || (message.role == .assistant && (message.isStreaming || hasToolCalls))
 
                 if showBubble {
-                    Group {
-                        if message.role == .assistant {
-                            if hasContent {
-                                // Limit markdown rendering to prevent stack overflow
-                                // on very long responses (5530+ recursion levels crash)
-                                let safeContent = message.content.count > 15000
-                                    ? String(message.content.prefix(15000)) + "\n\n*[Content truncated for display]*"
-                                    : message.content
-                                Markdown(safeContent)
-                                    .markdownTheme(.nvidia)
-                                    .textSelection(.enabled)
-                            } else {
-                                // Empty placeholder — keeps the bubble alive during
-                                // thinking / tool-only streaming phases.
-                                StreamingDotsView()
-                            }
-                        } else {
-                            Text(message.content)
-                                .font(.body)
+                    let theme = _resolveTheme(themeID)
+                    
+                    if message.role == .assistant {
+                        // Assistant bubble — clear glass content board
+                        ZStack(alignment: .leading) {
+                            // Markdown content (always present to prevent SwiftUI layout thrashing/rebuilds)
+                            let safeContent = message.content.count > 15000
+                                ? String(message.content.prefix(15000)) + "\n\n*[Content truncated for display]*"
+                                : message.content
+                            
+                            Markdown(safeContent)
+                                .markdownTheme(.nvidia)
                                 .textSelection(.enabled)
+                            
+                            // Streaming dots
+                            StreamingDotsView()
+                                .opacity(hasContent ? 0.0 : 0.9)
+                                .allowsHitTesting(false)
                         }
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .macContentBoard(cornerRadius: 18)
+                        .foregroundStyle(Color.primary)
+                        .contextMenu {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(message.content, forType: .string)
+                            } label: {
+                                Label("Copy Message", systemImage: "doc.on.doc")
+                            }
+                        }
+                    } else {
+                        // User bubble — tinted clear glass with theme accent
+                        Text(message.content)
+                            .font(.body)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .glassEffect(
+                                .clear.tint(theme.accentColor.opacity(0.22)).interactive(),
+                                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            )
+                            .foregroundStyle(GlassTheme.textPrimary)
+                            .contextMenu {
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(message.content, forType: .string)
+                                } label: {
+                                    Label("Copy Message", systemImage: "doc.on.doc")
+                                }
+                            }
                     }
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(
-                        message.role == .user
-                            ? .regular.tint(.blue.opacity(0.5))
-                            : .regular,
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
-                    .foregroundStyle(message.role == .user ? Color.white : Color.primary)
                 }
                 
                 // Status badges (Explored 1 file >, Running command...)
@@ -88,7 +115,7 @@ struct MessageBubbleView: View, Equatable {
                                 if let icon = badge.icon {
                                     Image(systemName: icon)
                                         .font(.system(size: 10))
-                                        .foregroundStyle(.blue.opacity(0.7))
+                                        .foregroundStyle(GlassTheme.textMuted)
                                 }
                                 Text(badge.text)
                                     .font(.system(size: 11, weight: .medium))
@@ -136,7 +163,7 @@ struct MessageBubbleView: View, Equatable {
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 8))
+                        .flatTileBackground(cornerRadius: 8)
                     }
                 }
                 
@@ -161,11 +188,11 @@ struct MessageBubbleView: View, Equatable {
             if message.role == .user {
                 ZStack {
                     Circle()
-                        .fill(.blue.opacity(0.08))
+                        .fill(_resolveTheme(themeID).accentColor.opacity(0.12))
                         .frame(width: 28, height: 28)
                     Image(systemName: "person.fill")
                         .font(.system(size: 11))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(_resolveTheme(themeID).accentColor)
                 }
                 .padding(.top, 4)
             } else {
@@ -214,6 +241,7 @@ struct WorkedForBadge: View {
 struct ToolCallPillView: View {
     let toolCall: Message.ToolCall
     @State private var isExpanded = false
+    @AppStorage("appThemeID") private var themeID = "liquid_glass_dark"
     
     private var isFileEdit: Bool {
         ["write_file", "edit_file", "replace_file"].contains(toolCall.name)
@@ -268,11 +296,11 @@ struct ToolCallPillView: View {
                             .foregroundStyle(.secondary)
                         Text(filename)
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(_resolveTheme(themeID).accentColor)
                     } else {
                         Image(systemName: toolIcon)
                             .font(.system(size: 10))
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(_resolveTheme(themeID).accentColor)
                         Text(toolCall.name.replacingOccurrences(of: "_", with: " "))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.primary)
@@ -317,13 +345,13 @@ struct ToolCallPillView: View {
                 .frame(maxHeight: 150)
             }
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 10))
+        .macContentBoard(cornerRadius: 10)
     }
     
     private var statusColor: Color {
         switch toolCall.status {
         case .pending: return .gray
-        case .running: return .blue
+        case .running: return GlassTheme.statusColor(for: "running")
         case .completed: return .green
         case .failed: return .red
         }
@@ -354,7 +382,7 @@ extension MarkdownUI.Theme {
         .code {
             FontFamilyVariant(.monospaced)
             FontSize(13)
-            ForegroundColor(Color(red: 0.4, green: 0.85, blue: 0.55))
+            ForegroundColor(GlassTheme.green)
         }
         .codeBlock { configuration in
             VStack(alignment: .leading, spacing: 0) {
@@ -365,7 +393,7 @@ extension MarkdownUI.Theme {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.04))
+                        .background(GlassTheme.flatFill)
                 }
                 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -373,19 +401,12 @@ extension MarkdownUI.Theme {
                         .markdownTextStyle {
                             FontFamilyVariant(.monospaced)
                             FontSize(13)
-                            ForegroundColor(Color(red: 0.4, green: 0.85, blue: 0.55))
+                            ForegroundColor(GlassTheme.green)
                         }
                         .padding(12)
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.black.opacity(0.4))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
-            )
+            .flatTileBackground(cornerRadius: 12)
         }
         .heading1 { configuration in
             configuration.label
@@ -417,7 +438,7 @@ extension MarkdownUI.Theme {
         .blockquote { configuration in
             HStack(spacing: 0) {
                 RoundedRectangle(cornerRadius: 2)
-                    .fill(Color.blue.opacity(0.5))
+                    .fill(GlassTheme.purple.opacity(0.5))
                     .frame(width: 3)
                 
                 configuration.label
@@ -441,7 +462,7 @@ struct StreamingDotsView: View {
         HStack(spacing: 4) {
             ForEach(0..<3, id: \.self) { i in
                 Circle()
-                    .fill(Color.blue.opacity(0.7))
+                    .fill(GlassTheme.textMuted)
                     .frame(width: 5, height: 5)
                     .offset(y: animate ? -3 : 0)
                     .animation(
@@ -499,11 +520,24 @@ struct ReasoningView: View {
             
             if isExpanded || isLive {
                 ScrollView {
-                    Text(content)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    // CPU optimization: Don't render huge character counts or text selection while streaming
+                    let displayContent = isLive && content.count > 800
+                        ? "... " + String(content.suffix(800)) 
+                        : content
+                    
+                    if isLive {
+                        Text(displayContent)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.disabled)
+                    } else {
+                        Text(displayContent)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
                 }
                 // Fixed height during streaming prevents layout jumping
                 .frame(height: isLive ? 100 : min(max(CGFloat(content.count) / 4, 60), 300))

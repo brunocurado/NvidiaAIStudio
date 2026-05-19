@@ -5,7 +5,7 @@ import SwiftUI
 struct PromptLabView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("appThemeID") private var appThemeID: String = "dark"
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
 
     @State private var userInput: String = ""
     @State private var generatedPrompt: String = ""
@@ -152,7 +152,7 @@ struct PromptLabView: View {
                 }
             }
             .frame(height: 120)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+            .macContentBoard(cornerRadius: 12)
         }
     }
     
@@ -212,7 +212,7 @@ struct PromptLabView: View {
                 .scrollContentBackground(.hidden)
                 .padding(8)
                 .frame(minHeight: 180)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12))
+                .macContentBoard(cornerRadius: 12)
 
             HStack(spacing: 8) {
                 Button {

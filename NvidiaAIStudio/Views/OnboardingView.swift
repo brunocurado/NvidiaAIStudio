@@ -17,17 +17,17 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.12)
-                .ignoresSafeArea()
+            // Liquid Glass backdrop
+            GlassCanvasBackdrop()
             Color.clear
-                .glassEffect(.regular, in: .rect)
+                .glassEffect(.clear, in: .rect)
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
                     ForEach(0..<4, id: \.self) { i in
                         Circle()
-                            .fill(stepIndex >= i ? Color.blue : Color.white.opacity(0.2))
+                            .fill(stepIndex >= i ? GlassTheme.purple : Color.primary.opacity(0.2))
                             .frame(width: 6, height: 6)
                             .animation(.easeInOut, value: stepIndex)
                     }
@@ -188,7 +188,7 @@ struct OnboardingView: View {
                 }
             }
             .padding(12)
-            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+            .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 40)
 
             SecureField("Paste your API key here", text: $apiKeyInput)
@@ -320,7 +320,7 @@ private struct FeaturePill: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
@@ -355,8 +355,8 @@ private struct ProviderRow: View {
             .padding(12)
             .background(
                 isSelected
-                    ? Color.blue.opacity(0.12)
-                    : Color.white.opacity(0.04),
+                    ? GlassTheme.purple.opacity(0.12)
+                    : GlassTheme.flatFill,
                 in: RoundedRectangle(cornerRadius: 10)
             )
             .overlay(

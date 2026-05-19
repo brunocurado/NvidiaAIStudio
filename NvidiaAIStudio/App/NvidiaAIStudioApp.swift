@@ -7,7 +7,7 @@ struct NvidiaAIStudioApp: App {
     @State private var appState = AppState()
     @State private var showSplash = true
     @State private var showOnboarding = false
-    @AppStorage("appThemeID") private var appThemeID: String = "dark"
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     private var colorScheme: ColorScheme? {
@@ -19,6 +19,7 @@ struct NvidiaAIStudioApp: App {
             ZStack {
                 ContentView(showSplash: showSplash)
                     .environment(appState)
+                    .modelContainer(appState.modelContainer)
                     .opacity(showSplash ? 0 : 1)
                 
                 if showSplash {
@@ -34,6 +35,8 @@ struct NvidiaAIStudioApp: App {
             .preferredColorScheme(colorScheme)
             .onAppear {
                 appState.bootstrap()
+                SpotlightManager.shared.setup(appState: appState)
+                
                 if appState.apiKeys.isEmpty {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
                         showOnboarding = true
@@ -52,6 +55,7 @@ struct NvidiaAIStudioApp: App {
         Settings {
             SettingsView()
                 .environment(appState)
+                .preferredColorScheme(colorScheme)
         }
         
         .commands {
@@ -108,7 +112,6 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
         w.toolbarStyle = .unified
-
 
         // Aggressively clear all titlebar container backgrounds
         func clearBackground(_ view: NSView) {
@@ -173,11 +176,15 @@ extension Notification.Name {
 // MARK: - Notifications helper
 
 enum AppNotifications {
+    static var isBundle: Bool { Bundle.main.bundleIdentifier != nil }
+
     static func requestPermission() {
+        guard isBundle else { return }
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
     
     static func sendResponseCompleted(modelName: String) {
+        guard isBundle else { return }
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized else { return }
             guard NSApp.isHidden || NSApp.mainWindow?.isKeyWindow == false else { return }

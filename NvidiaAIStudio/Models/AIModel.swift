@@ -64,6 +64,7 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
     /// Curated default models matching the Python `models.py` list.
     static let defaultModels: [AIModel] = [
         // ── Flagship / Daily Drivers ──
+        AIModel(id: "deepseek-ai/deepseek-v4-pro", name: "🔮 DeepSeek V4-Pro Max", contextWindow: 1_000_000, supportsThinking: true),
         AIModel(id: "deepseek-ai/deepseek-v3.2", name: "🔮 DeepSeek V3.2 — Raciocínio de topo", contextWindow: 128_000, supportsThinking: true),
         AIModel(id: "deepseek-ai/deepseek-v3.1", name: "🧠 DeepSeek V3.1 — Versão estável", contextWindow: 128_000, supportsThinking: true),
         AIModel(id: "meta/llama-3.3-70b-instruct", name: "⚡ Llama 3.3 70B — Rápido e fiável", contextWindow: 131_072),

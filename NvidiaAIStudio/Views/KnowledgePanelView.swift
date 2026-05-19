@@ -517,7 +517,7 @@ struct FileRowView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isHovered ? .white.opacity(0.05) : .clear)
+                .fill(isHovered ? GlassTheme.flatFill : .clear)
         )
         .onHover { isHovered = $0 }
         .animation(.easeOut(duration: 0.1), value: isHovered)

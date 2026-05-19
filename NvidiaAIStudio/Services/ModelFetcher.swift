@@ -12,13 +12,16 @@ enum ModelFetcher {
     /// Models not matched here default to 128K.
     private static let knownContextWindows: [(pattern: String, contextWindow: Int)] = [
         // 1M+ context
+        ("deepseek-v4",                 1_000_000),
         ("gpt-4.1",                     1_000_000),
+        ("qwen3.6",                     1_000_000),
         
         // 262K context
         ("kimi-k2",                     262_144),
-        ("kimi-k1.5",                   262_144),
+        ("kami-k1.5",                   262_144),
         ("nemotron-3-super",            262_144),
         ("qwen3.5-122b",               262_144),
+        ("gemma-4",                     262_144),
         
         // 200K context
         ("claude",                      200_000),
@@ -61,7 +64,7 @@ enum ModelFetcher {
     private static let thinkingPatterns = [
         "thinking", "deepseek", "qwq", "kimi", "o1", "o3", "o4",
         "qwen3-next", "qwen3.5", "nemotron-3-super",
-        "mistral-small-4", "mistral-medium-3", "mistral-large-3"
+        "mistral-small-4", "mistral-medium-3", "mistral-large-3", "gemma-4"
     ]
     
     /// Patterns that indicate vision/multimodal support
@@ -73,9 +76,13 @@ enum ModelFetcher {
     
     // MARK: - Fetch
     
-    /// Fetch the list of available models from the NVIDIA NIM API.
-    static func fetchModels(apiKey: String, baseURL: String = "https://integrate.api.nvidia.com/v1") async -> [AIModel]? {
-        guard let url = URL(string: "\(baseURL)/models") else { return nil }
+    /// Fetch the list of available models from the active API.
+    static func fetchModels(apiKey: String, baseURL: String, provider: Provider) async -> [AIModel]? {
+        // Skip Anthropic native API since it doesn't have a standard /v1/models endpoint
+        if provider == .anthropic { return nil }
+        
+        let endpoint = baseURL.hasSuffix("/") ? "\(baseURL)models" : "\(baseURL)/models"
+        guard let url = URL(string: endpoint) else { return nil }
         
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -84,33 +91,58 @@ enum ModelFetcher {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else { return nil }
+            guard let httpResponse = response as? HTTPURLResponse else { 
+                print("ModelFetcher: Not an HTTP response")
+                return nil 
+            }
+            
+            if httpResponse.statusCode != 200 {
+                print("ModelFetcher: HTTP \(httpResponse.statusCode) from \(endpoint)")
+                return nil
+            }
             
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let models = json["data"] as? [[String: Any]] else { return nil }
+                  let models = json["data"] as? [[String: Any]] else { 
+                print("ModelFetcher: JSON decode failed")
+                return nil 
+            }
             
-            return models.compactMap { modelDict -> AIModel? in
+            let parsed = models.compactMap { modelDict -> AIModel? in
                 guard let id = modelDict["id"] as? String else { return nil }
                 
-                let name = formatModelName(id)
-                let contextWindow = resolveContextWindow(for: id)
-                let supportsThinking = thinkingPatterns.contains { id.contains($0) }
-                let supportsVision = visionPatterns.contains { id.contains($0) }
+                // OpenRouter often adds name field
+                let rawName = modelDict["name"] as? String ?? id
+                let name = formatModelName(rawName.isEmpty ? id : rawName)
+                
+                var dynamicContext = modelDict["context_length"] as? Int
+                if dynamicContext == nil, let topProv = modelDict["top_provider"] as? [String: Any] {
+                    dynamicContext = topProv["context_length"] as? Int
+                }
+                if dynamicContext == nil, let arch = modelDict["architecture"] as? [String: Any] {
+                    dynamicContext = arch["context_length"] as? Int
+                }
+                
+                let contextWindow = dynamicContext ?? resolveContextWindow(for: id)
+                
+                let supportsThinking = thinkingPatterns.contains { id.lowercased().contains($0) }
+                let supportsVision = visionPatterns.contains { id.lowercased().contains($0) }
                 
                 return AIModel(
                     id: id,
                     name: name,
-                    provider: .nvidia,
+                    provider: provider,
                     contextWindow: contextWindow,
                     supportsThinking: supportsThinking,
                     supportsVision: supportsVision,
                     isEnabled: true
                 )
-            }
-            .sorted { $0.name < $1.name }
+            }.sorted { $0.name < $1.name }
+            
+            print("ModelFetcher: Successfully fetched \(parsed.count) models!")
+            return parsed
             
         } catch {
+            print("ModelFetcher: Network error - \(error.localizedDescription)")
             return nil
         }
     }

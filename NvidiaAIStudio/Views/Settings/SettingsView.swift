@@ -2,6 +2,10 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
+    @State private var window: NSWindow?
+    
+    private var theme: AppTheme { AppTheme.find(id: appThemeID) }
     
     var body: some View {
         TabView {
@@ -19,7 +23,28 @@ struct SettingsView: View {
                 .tabItem { Label("SSH", systemImage: "terminal.fill") }
         }
         .frame(width: 620, height: 560)
+        .background(theme.backgroundTint.ignoresSafeArea())
+        .background(WindowAccessor(window: $window))
+        .onChange(of: window) { _, w in
+            w?.titlebarAppearsTransparent = true
+            w?.backgroundColor = .clear
+        }
+        .onChange(of: theme) { _, newTheme in
+            window?.backgroundColor = .clear
+        }
+        // Force the app to re-evaluate the primary text color against the environment to fix macOS caching bug
+        .foregroundStyle(.primary)
     }
+}
+
+private struct WindowAccessor: NSViewRepresentable {
+    @Binding var window: NSWindow?
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { self.window = view.window }
+        return view
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 // MARK: - API Keys Tab
@@ -157,7 +182,7 @@ struct ModelsSettingsView: View {
 // MARK: - General Tab
 
 struct GeneralSettingsView: View {
-    @AppStorage("appThemeID") private var appThemeID: String = "dark"
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
     @AppStorage("glassOpacity") private var glassOpacity: Double = 0.25
     @AppStorage("glassBlur") private var glassBlur: Double = 20.0
     @AppStorage("visionDelegateModelID") private var visionDelegateModelID = "nvidia/nemotron-nano-12b-v2-vl"
@@ -254,7 +279,7 @@ struct GitHubSettingsView: View {
                         .buttonStyle(.bordered).padding(.top, 4)
                     }
                     .foregroundStyle(.secondary).padding(12)
-                    .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                    .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 8))
 
                     HStack(spacing: 8) {
                         SecureField("ghp_xxxxxxxxxxxxxxxxxxxx", text: $patInput)
@@ -355,14 +380,21 @@ struct MCPServerRow: View {
         manager.connections.first { $0.id == config.id }
     }
 
+    @State private var showingEditSheet = false
+
     var body: some View {
         HStack(spacing: 10) {
             Circle().fill(statusColor).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(config.name).font(.body).fontWeight(.medium)
                 Text(config.summary).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                if let conn = connection, !conn.discoveredTools.isEmpty {
-                    Text("\(conn.discoveredTools.count) tools").font(.caption2).foregroundStyle(.secondary)
+                
+                if let conn = connection {
+                    if case .failed = conn.status, let err = conn.lastError {
+                        Text(err).font(.caption).foregroundStyle(.red).lineLimit(2)
+                    } else if !conn.discoveredTools.isEmpty {
+                        Text("\(conn.discoveredTools.count) tools").font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
             Spacer()
@@ -370,12 +402,18 @@ struct MCPServerRow: View {
                 get: { config.isEnabled },
                 set: { manager.toggleServer(id: config.id, enabled: $0) }
             )).labelsHidden()
+            Button { showingEditSheet = true } label: {
+                Image(systemName: "pencil").font(.caption)
+            }.buttonStyle(.borderless)
             Button(role: .destructive) { manager.removeServer(id: config.id) } label: {
                 Image(systemName: "trash").font(.caption)
             }.buttonStyle(.borderless)
         }
         .padding(10)
-        .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+        .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 8))
+        .sheet(isPresented: $showingEditSheet) {
+            AddMCPServerSheet(isPresented: $showingEditSheet, editingConfig: config)
+        }
     }
 
     private var statusColor: Color {
@@ -390,12 +428,15 @@ struct MCPServerRow: View {
 
 struct AddMCPServerSheet: View {
     @Binding var isPresented: Bool
+    var editingConfig: MCPServerConfig? = nil
+
     @State private var manager = MCPManager.shared
     @State private var name = ""
     @State private var transportType = 0
     @State private var command = "npx"
     @State private var args = "-y @modelcontextprotocol/server-filesystem ~/projects"
     @State private var sseURL = "http://localhost:3000/sse"
+    @State private var envText = ""
 
     private let presets: [(name: String, command: String, args: String)] = [
         ("Filesystem",   "npx", "-y @modelcontextprotocol/server-filesystem ~/projects"),
@@ -410,7 +451,7 @@ struct AddMCPServerSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Add MCP Server").font(.headline)
+                Text(editingConfig == nil ? "Add MCP Server" : "Edit MCP Server").font(.headline)
                 Spacer()
                 Button("Cancel") { isPresented = false }.keyboardShortcut(.cancelAction)
             }.padding()
@@ -449,6 +490,13 @@ struct AddMCPServerSheet: View {
                             Text("Arguments").font(.caption).foregroundStyle(.secondary)
                             TextField("-y @modelcontextprotocol/server-filesystem ~/projects", text: $args)
                                 .textFieldStyle(.roundedBorder).font(.system(.body, design: .monospaced))
+                            
+                            Text("Environment Variables").font(.caption).foregroundStyle(.secondary)
+                            TextEditor(text: $envText)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(height: 60)
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
+                            Text("One per line. Format: KEY=VALUE").font(.caption2).foregroundStyle(.secondary)
                         }
                     } else {
                         VStack(alignment: .leading, spacing: 6) {
@@ -460,25 +508,58 @@ struct AddMCPServerSheet: View {
 
                     HStack {
                         Spacer()
-                        Button("Add & Connect") { addServer() }
+                        Button(editingConfig == nil ? "Add & Connect" : "Save Changes") { saveServer() }
                             .buttonStyle(.borderedProminent).disabled(name.isEmpty).keyboardShortcut(.defaultAction)
                     }
                 }
                 .padding()
             }
         }
-        .frame(width: 480, height: 500)
+        .frame(width: 480, height: 600)
+        .onAppear {
+            if let config = editingConfig {
+                name = config.name
+                switch config.transport {
+                case .stdio(let cmd, let arguments, let env):
+                    transportType = 0
+                    command = cmd
+                    args = arguments.joined(separator: " ")
+                    envText = env.map { "\($0.key)=\($0.value)" }.joined(separator: "\n")
+                case .sse(let url, _):
+                    transportType = 1
+                    sseURL = url
+                }
+            }
+        }
     }
 
-    private func addServer() {
+    private func saveServer() {
         let transport: MCPServerConfig.Transport
         if transportType == 0 {
             let argList = args.split(separator: " ").map(String.init)
-            transport = .stdio(command: command, args: argList, env: [:])
+            
+            var parsedEnv: [String: String] = [:]
+            for line in envText.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+                let parts = trimmed.split(separator: "=", maxSplits: 1).map(String.init)
+                if parts.count == 2 {
+                    parsedEnv[parts[0]] = parts[1]
+                }
+            }
+            
+            transport = .stdio(command: command, args: argList, env: parsedEnv)
         } else {
             transport = .sse(url: sseURL, headers: [:])
         }
-        manager.addServer(MCPServerConfig(name: name, transport: transport))
+        
+        if let existing = editingConfig {
+            let updated = MCPServerConfig(id: existing.id, name: name, transport: transport, isEnabled: existing.isEnabled)
+            manager.updateServer(updated)
+        } else {
+            manager.addServer(MCPServerConfig(name: name, transport: transport))
+        }
+        
         isPresented = false
     }
 }
@@ -498,13 +579,13 @@ struct ThemeCard: View {
                         RoundedRectangle(cornerRadius: 3).fill(theme.sidebarTint).frame(width: 18)
                         VStack(spacing: 3) {
                             RoundedRectangle(cornerRadius: 2).fill(theme.accentColor.opacity(0.7)).frame(height: 5)
-                            RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.3)).frame(height: 5)
-                            RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.2)).frame(height: 5)
+                            RoundedRectangle(cornerRadius: 2).fill(Color.primary.opacity(0.3)).frame(height: 5)
+                            RoundedRectangle(cornerRadius: 2).fill(Color.primary.opacity(0.2)).frame(height: 5)
                         }
                         .padding(.trailing, 4)
                     }.padding(5)
                 )
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(isSelected ? theme.accentColor : Color.white.opacity(0.1), lineWidth: isSelected ? 2 : 1))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(isSelected ? theme.accentColor : Color.primary.opacity(0.1), lineWidth: isSelected ? 2 : 1))
             HStack(spacing: 4) {
                 Image(systemName: theme.icon).font(.system(size: 9)).foregroundStyle(isSelected ? theme.accentColor : .secondary)
                 Text(theme.name).font(.system(size: 10)).foregroundStyle(isSelected ? .primary : .secondary)

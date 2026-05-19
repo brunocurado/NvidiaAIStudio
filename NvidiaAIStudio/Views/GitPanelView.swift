@@ -135,10 +135,10 @@ struct GitPanelView: View {
                                 .font(.body)
                                 .frame(minHeight: 80)
                                 .padding(8)
-                                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+                                .background(GlassTheme.flatFill, in: RoundedRectangle(cornerRadius: 8))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .stroke(.white.opacity(0.1), lineWidth: 1)
+                                        .stroke(GlassTheme.flatStroke, lineWidth: 1)
                                 )
                         }
                         .padding(.horizontal, 16)

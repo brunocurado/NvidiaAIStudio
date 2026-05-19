@@ -43,6 +43,7 @@ final class SkillRegistry {
         register(FetchURLSkill())
         register(FetchImagesSkill())
         register(WebSearchSkill())
+        register(KnowledgeSearchSkill())
         
         if let saved = UserDefaults.standard.dictionary(forKey: "skillStates") as? [String: Bool] {
             for (name, enabled) in saved where !enabled {

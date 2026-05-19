@@ -35,7 +35,7 @@ struct ChatView: View {
                                     .foregroundStyle(.secondary)
                                     .padding(.vertical, 8)
                                     .padding(.horizontal, 16)
-                                    .background(.white.opacity(0.05), in: Capsule())
+                                    .background(GlassTheme.flatFill, in: Capsule())
                                 }
                                 .buttonStyle(.plain)
                                 .frame(maxWidth: .infinity)
@@ -128,7 +128,7 @@ struct ChatView: View {
                         let _ = appState.createSession()
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(.blue)
+                    .tint(GlassTheme.purple)
                 }
                 Spacer()
             }
@@ -261,7 +261,7 @@ struct BackgroundAgentsPanelView: View {
                             Text(agent.name)
                                 .font(.caption)
                                 .fontWeight(.semibold)
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(GlassTheme.purple)
                             
                             Text("(\(agent.task))")
                                 .font(.caption)
@@ -305,7 +305,7 @@ struct BackgroundAgentsPanelView: View {
                 .padding(.vertical, 10)
             }
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14))
+        .macContentBoard(cornerRadius: 14)
         .sheet(item: $selectedAgent) { agent in
             AgentDetailView(agentID: agent.id)
                 .environment(appState)
