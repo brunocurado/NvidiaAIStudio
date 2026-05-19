@@ -9,11 +9,10 @@ struct SettingsView: View {
     
     var body: some View {
         ZStack {
-            // Real Liquid Glass background context
-            GlassCanvasBackdrop()
-            
-            // Subtly colored overlay matching the selected theme
+            // Subtly colored overlay matching the selected theme.
+            // Using contentShape ensures the empty background regions receive click/drag hit testing.
             theme.backgroundTint.ignoresSafeArea()
+                .contentShape(Rectangle())
             
             TabView {
                 APIKeysSettingsView()
@@ -33,12 +32,21 @@ struct SettingsView: View {
         .frame(width: 620, height: 560)
         .background(WindowAccessor(window: $window))
         .onChange(of: window) { _, w in
-            w?.titlebarAppearsTransparent = true
-            w?.backgroundColor = .clear
-            w?.isMovableByWindowBackground = true
+            guard let w = w else { return }
+            AppWindowStyler.applyToSettings(to: w)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                AppWindowStyler.applyToSettings(to: w)
+            }
         }
         .onChange(of: theme) { _, newTheme in
-            window?.backgroundColor = .clear
+            guard let w = window else { return }
+            AppWindowStyler.applyToSettings(to: w)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                AppWindowStyler.applyToSettings(to: w)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                AppWindowStyler.applyToSettings(to: w)
+            }
         }
         // Force the app to re-evaluate the primary text color against the environment to fix macOS caching bug
         .foregroundStyle(.primary)

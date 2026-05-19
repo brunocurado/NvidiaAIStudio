@@ -82,6 +82,8 @@ struct NvidiaAIStudioApp: App {
 
 // MARK: - Window Styler
 
+final class SettingsBackdropView: NSVisualEffectView {}
+
 final class AppWindowStyler: NSObject, NSWindowDelegate {
     static let shared = AppWindowStyler()
 
@@ -103,6 +105,57 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
         
         w.delegate = shared
         styleWindow(w)
+    }
+
+    static func applyToSettings(to window: NSWindow?) {
+        guard let w = window else { return }
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.titlebarAppearsTransparent = true
+        w.isMovableByWindowBackground = true
+        
+        // Configure native Visual Effect View backdrop for premium macOS refractive glass styling
+        if let contentView = w.contentView {
+            let frameView = contentView.superview
+            var effectView = frameView?.subviews.first(where: { $0 is SettingsBackdropView }) as? SettingsBackdropView
+            
+            if effectView == nil {
+                if let bounds = frameView?.bounds {
+                    let ev = SettingsBackdropView(frame: bounds)
+                    ev.autoresizingMask = [.width, .height]
+                    ev.blendingMode = .behindWindow
+                    frameView?.addSubview(ev, positioned: .below, relativeTo: nil)
+                    effectView = ev
+                }
+            }
+            
+            effectView?.material = .hudWindow
+            effectView?.state = .active
+        }
+        
+        // Clear opaque backgrounds from titlebar and window frame
+        func clearBackground(_ view: NSView) {
+            guard !(view is SettingsBackdropView) else { return }
+            view.wantsLayer = true
+            view.layer?.backgroundColor = CGColor.clear
+            view.layer?.borderWidth = 0
+            if let ev = view as? NSVisualEffectView {
+                ev.state = .inactive
+                ev.alphaValue = 0
+            }
+            for sub in view.subviews { clearBackground(sub) }
+        }
+
+        if let titlebarContainer = w.standardWindowButton(.closeButton)?.superview?.superview {
+            clearBackground(titlebarContainer)
+        }
+        if let frameView = w.contentView?.superview {
+            for sub in frameView.subviews {
+                if sub !== w.contentView && !(sub is SettingsBackdropView) {
+                    clearBackground(sub)
+                }
+            }
+        }
     }
 
     private static func styleWindow(_ w: NSWindow) {
