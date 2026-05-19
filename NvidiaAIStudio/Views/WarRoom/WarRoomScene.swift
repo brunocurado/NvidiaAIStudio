@@ -8,7 +8,7 @@ enum OfficeAgentState: Equatable {
     case working
     case speaking
     case debating
-    case waiting(for: String)  // blocked on another agent
+    case waiting(for: String)
 
     static func == (lhs: OfficeAgentState, rhs: OfficeAgentState) -> Bool {
         switch (lhs, rhs) {
@@ -59,7 +59,7 @@ final class AgentPodNode: SKNode {
         podBG.lineWidth = 1
         podBG.zPosition = 0
 
-        // Accent glow ring (normally dim, pulses when working)
+        // Accent glow ring
         accentGlow = SKShapeNode(rectOf: CGSize(width: podW + 4, height: podH + 4), cornerRadius: 15)
         accentGlow.fillColor = .clear
         accentGlow.strokeColor = .clear
@@ -75,7 +75,6 @@ final class AgentPodNode: SKNode {
            let img = NSImage(contentsOf: url) {
             texture = SKTexture(image: img)
         } else {
-            // Coloured circle fallback
             let fallback = NSImage(size: NSSize(width: 128, height: 128))
             fallback.lockFocus()
             NSColor(hex: accentHex)?.withAlphaComponent(0.6).setFill()
@@ -84,8 +83,7 @@ final class AgentPodNode: SKNode {
             texture = SKTexture(image: fallback)
         }
 
-        avatarSprite = SKSpriteNode(texture: texture,
-                                    size: CGSize(width: avatarD, height: avatarD))
+        avatarSprite = SKSpriteNode(texture: texture, size: CGSize(width: avatarD, height: avatarD))
         let maskCircle = SKShapeNode(circleOfRadius: avatarD / 2)
         maskCircle.fillColor = .white
         cropNode = SKCropNode()
@@ -119,7 +117,7 @@ final class AgentPodNode: SKNode {
         statusLabel.horizontalAlignmentMode = .left
         statusLabel.zPosition = 3
 
-        // ── Terminal window (hidden by default) ─────────────────────────
+        // ── Terminal window ─────────────────────────────────────────────
         terminalNode = SKShapeNode(rectOf: CGSize(width: 96, height: 22), cornerRadius: 4)
         terminalNode.fillColor = SKColor(red: 0, green: 0.1, blue: 0.05, alpha: 0.9)
         terminalNode.strokeColor = SKColor(red: 0, green: 0.8, blue: 0.4, alpha: 0.4)
@@ -136,7 +134,6 @@ final class AgentPodNode: SKNode {
 
         super.init()
 
-        // Add children
         addChild(podBG)
         addChild(accentGlow)
         addChild(cropNode)
@@ -147,12 +144,11 @@ final class AgentPodNode: SKNode {
         addChild(terminalNode)
         terminalNode.addChild(terminalText)
 
-        // Physics Body for satisfying drag-and-throw collisions
         let body = SKPhysicsBody(circleOfRadius: 46)
-        body.isDynamic = false // Static by default, turned active on drag/throw
+        body.isDynamic = false
         body.affectedByGravity = false
         body.allowsRotation = false
-        body.restitution = 0.8 // Satisfying bouncy glass pods
+        body.restitution = 0.8
         body.friction = 0.1
         body.linearDamping = 0.6
         self.physicsBody = body
@@ -163,7 +159,6 @@ final class AgentPodNode: SKNode {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // MARK: Layout (SpriteKit origin = bottom-left of node's frame)
     private func layout() {
         cropNode.position    = CGPoint(x: 0, y: 22)
         nameLabel.position   = CGPoint(x: 0, y: -10)
@@ -174,7 +169,6 @@ final class AgentPodNode: SKNode {
         terminalText.position = CGPoint(x: -44, y: -3)
     }
 
-    // MARK: Idle breathe
     private func startIdleBreathe() {
         let delay = Double.random(in: 0...1.5)
         let dur   = Double.random(in: 2.2...3.2)
@@ -188,8 +182,6 @@ final class AgentPodNode: SKNode {
         cropNode.run(breathe, withKey: "breathe")
     }
 
-    // MARK: - Drag Animation Encapsulation
-
     func startGrabAnimation() {
         cropNode.removeAction(forKey: "breathe")
         cropNode.removeAction(forKey: "bounce")
@@ -200,10 +192,7 @@ final class AgentPodNode: SKNode {
         cropNode.run(SKAction.scale(to: 1.0, duration: 0.15))
     }
 
-    // MARK: - State transitions
-
     func setState(_ newState: OfficeAgentState, animated: Bool = true) {
-        guard newState != state else { return }
         state = newState
 
         cropNode.removeAction(forKey: "breathe")
@@ -216,44 +205,53 @@ final class AgentPodNode: SKNode {
             setStatusAppearance(text: "Idle", dotColor: SKColor(white: 1, alpha: 0.25))
             accentGlow.run(SKAction.fadeOut(withDuration: 0.4))
             hideTerminal()
-            cropNode.run(SKAction.scale(to: 1, duration: 0.3)) { [weak self] in
+            
+            // Hide large panels to save screen space when idle
+            podBG.run(SKAction.fadeOut(withDuration: 0.25))
+            roleLabel.run(SKAction.fadeOut(withDuration: 0.25))
+            statusDot.run(SKAction.fadeOut(withDuration: 0.25))
+            statusLabel.run(SKAction.fadeOut(withDuration: 0.25))
+            
+            // Reposition name immediately below circular avatar
+            nameLabel.run(SKAction.move(to: CGPoint(x: 0, y: -44), duration: 0.25))
+            
+            cropNode.run(SKAction.scale(to: 0.9, duration: 0.3)) { [weak self] in
                 self?.startIdleBreathe()
             }
 
-        case .working:
-            setStatusAppearance(text: "Working", dotColor: .green)
-            showGlowPulse()
-            showTerminal()
-            cropNode.run(SKAction.scale(to: 1.08, duration: 0.3))
-
-        case .speaking:
-            setStatusAppearance(text: "Speaking…", dotColor: .cyan)
-            showGlowPulse()
-            let bounce = SKAction.repeatForever(SKAction.sequence([
-                SKAction.moveBy(x: 0, y: 7, duration: 0.22),
-                SKAction.moveBy(x: 0, y: -7, duration: 0.22)
-            ]))
-            cropNode.run(bounce, withKey: "bounce")
-
-        case .debating:
-            setStatusAppearance(text: "Debating", dotColor: .orange)
-            showGlowPulse()
-            cropNode.run(SKAction.scale(to: 1.05, duration: 0.3))
-
-        case .waiting(let blockedOn):
-            setStatusAppearance(text: "⏳ Waiting", dotColor: .yellow)
-            accentGlow.strokeColor = SKColor.yellow.withAlphaComponent(0.4)
-            accentGlow.run(SKAction.repeatForever(SKAction.sequence([
-                SKAction.fadeAlpha(to: 0.8, duration: 1.2),
-                SKAction.fadeAlpha(to: 0.2, duration: 1.2)
-            ])), withKey: "glow_pulse")
-            // show a small balloon above the pod
-            showWaitingBalloon(text: "Wait: \(blockedOn)")
+        case .working, .speaking, .debating, .waiting:
+            setStatusAppearance(text: newState == .working ? "Working" : newState == .speaking ? "Speaking…" : newState == .debating ? "Debating" : "⏳ Waiting", 
+                                dotColor: newState == .working ? .green : newState == .speaking ? .cyan : newState == .debating ? .orange : .yellow)
+            
+            podBG.run(SKAction.fadeIn(withDuration: 0.25))
+            roleLabel.run(SKAction.fadeIn(withDuration: 0.25))
+            statusDot.run(SKAction.fadeIn(withDuration: 0.25))
+            statusLabel.run(SKAction.fadeIn(withDuration: 0.25))
+            
+            nameLabel.run(SKAction.move(to: CGPoint(x: 0, y: -10), duration: 0.25))
+            
+            if newState == .working {
+                showGlowPulse()
+                showTerminal()
+                cropNode.run(SKAction.scale(to: 1.08, duration: 0.3))
+            } else if newState == .speaking {
+                showGlowPulse()
+                let bounce = SKAction.repeatForever(SKAction.sequence([
+                    SKAction.moveBy(x: 0, y: 7, duration: 0.22),
+                    SKAction.moveBy(x: 0, y: -7, duration: 0.22)
+                ]))
+                cropNode.run(bounce, withKey: "bounce")
+            } else if newState == .debating {
+                showGlowPulse()
+                cropNode.run(SKAction.scale(to: 1.05, duration: 0.3))
+            } else if case .waiting(let blockedOn) = newState {
+                showGlowPulse()
+                showWaitingBalloon(text: "Wait: \(blockedOn)")
+            }
         }
     }
 
     private func showWaitingBalloon(text: String) {
-        // Remove any existing balloon
         childNode(withName: "waiting_balloon")?.removeFromParent()
 
         let balloon = SKShapeNode(rectOf: CGSize(width: 100, height: 20), cornerRadius: 6)
@@ -317,7 +315,6 @@ final class WarRoomScene: SKScene {
 
     // MARK: Agent registry
     private(set) var pods: [String: AgentPodNode] = [:]
-    private var layoutCounter: Int = 0
 
     // MARK: Debate table & Data streams
     private var debateTable: SKNode?
@@ -343,17 +340,14 @@ final class WarRoomScene: SKScene {
         backgroundColor = SKColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
         setupBackground()
 
-        // Define screen borders for physics bounce
         self.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(origin: .zero, size: self.size))
         self.physicsBody?.restitution = 0.8
         self.physicsBody?.friction = 0.1
         self.physicsBody?.categoryBitMask = 1
 
-        // Add laser container
         debateLaserContainer.zPosition = -2
         addChild(debateLaserContainer)
 
-        // Enable user interaction
         isUserInteractionEnabled = true
     }
 
@@ -362,6 +356,38 @@ final class WarRoomScene: SKScene {
         self.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(origin: .zero, size: self.size))
         self.physicsBody?.restitution = 0.8
         self.physicsBody?.friction = 0.1
+
+        // Re-calculate vertical lounge background
+        if let lounge = childNode(withName: "lounge_bg") as? SKShapeNode {
+            let loungeW: CGFloat = 190
+            let loungeH: CGFloat = max(200, size.height - 180)
+            lounge.path = CGPath(roundedRect: CGRect(x: -loungeW/2, y: -loungeH/2, width: loungeW, height: loungeH), cornerWidth: 16, cornerHeight: 16, transform: nil)
+            lounge.position = CGPoint(x: size.width - loungeW/2 - 20, y: size.height/2 + 20)
+
+            if let lbl = lounge.childNode(withName: "lounge_lbl") {
+                lbl.position = CGPoint(x: 0, y: loungeH/2 - 22)
+            }
+            if let emitter = lounge.childNode(withName: "lounge_steam") as? SKEmitterNode {
+                emitter.position = CGPoint(x: 0, y: -loungeH/2 + 20)
+                emitter.particlePositionRange = CGVector(dx: loungeW - 40, dy: 10)
+            }
+        }
+
+        // Align all idle/work pods to their fresh size/bounds
+        for (name, pod) in pods {
+            let targetPos: CGPoint
+            if pod.state == .idle {
+                targetPos = loungePosition(for: name)
+            } else if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
+                targetPos = gridPosition(for: idx)
+            } else {
+                targetPos = pod.homePosition
+            }
+            pod.homePosition = targetPos
+            if !pod.isBeingDragged {
+                pod.position = targetPos
+            }
+        }
     }
 
     private func setupBackground() {
@@ -397,26 +423,27 @@ final class WarRoomScene: SKScene {
             addChild(g)
         }
 
-        // ── Rest Lounge Area Decoration ────────────────────────────────
-        let loungeW: CGFloat = 220, loungeH: CGFloat = 165
+        // ── Rest Lounge Area (Vertical Sidebar Layout) ─────────────────
+        let loungeW: CGFloat = 190, loungeH: CGFloat = max(200, size.height - 180)
         let loungeRect = SKShapeNode(rectOf: CGSize(width: loungeW, height: loungeH), cornerRadius: 16)
-        loungeRect.fillColor = SKColor.magenta.withAlphaComponent(0.025)
-        loungeRect.strokeColor = SKColor.magenta.withAlphaComponent(0.12)
-        loungeRect.lineWidth = 1.5
-        loungeRect.position = CGPoint(x: size.width - loungeW/2 - 20, y: size.height - loungeH/2 - 20)
+        loungeRect.fillColor = SKColor.magenta.withAlphaComponent(0.015)
+        loungeRect.strokeColor = SKColor.magenta.withAlphaComponent(0.08)
+        loungeRect.lineWidth = 1.2
+        loungeRect.position = CGPoint(x: size.width - loungeW/2 - 20, y: size.height/2 + 20)
         loungeRect.name = "lounge_bg"
         loungeRect.zPosition = -6
         addChild(loungeRect)
 
-        let loungeLabel = SKLabelNode(text: "☕ REST LOUNGE")
+        let loungeLabel = SKLabelNode(text: "☕ STANDBY LOUNGE")
+        loungeLabel.name = "lounge_lbl"
         loungeLabel.fontName = "SFProDisplay-Bold"
         loungeLabel.fontSize = 9
         loungeLabel.fontColor = SKColor.magenta.withAlphaComponent(0.3)
         loungeLabel.position = CGPoint(x: 0, y: loungeH/2 - 22)
         loungeRect.addChild(loungeLabel)
 
-        // Lounge bubble emitters (steam/coffee ambient effect)
         let steamEmitter = SKEmitterNode()
+        steamEmitter.name = "lounge_steam"
         steamEmitter.particleBirthRate = 3
         steamEmitter.particleLifetime = 4.0
         steamEmitter.particlePositionRange = CGVector(dx: loungeW - 40, dy: 10)
@@ -442,7 +469,6 @@ final class WarRoomScene: SKScene {
             desk.zPosition = -5
             addChild(desk)
 
-            // Screen glow symbol
             let screen = SKShapeNode(rectOf: CGSize(width: 22, height: 14), cornerRadius: 2)
             screen.fillColor = SKColor.cyan.withAlphaComponent(0.08)
             screen.strokeColor = SKColor.cyan.withAlphaComponent(0.25)
@@ -464,7 +490,6 @@ final class WarRoomScene: SKScene {
             desk.addChild(label)
         }
 
-        // ── "NVIDIA AI STUDIO" watermark ──────────────────────────────
         let watermark = SKLabelNode(text: "NVIDIA AI STUDIO — COMMAND CENTER")
         watermark.fontName = "SFMono-Regular"
         watermark.fontSize = 9
@@ -480,17 +505,30 @@ final class WarRoomScene: SKScene {
         let col = index % columns
         let row = index / columns
         let totalWidth = CGFloat(columns - 1) * podSpacingX
-        let startX = (size.width - totalWidth) / 2
+        
+        let spaceAvailable = size.width - 230
+        let startX = max(40, (spaceAvailable - totalWidth) / 2 + 20)
         let startY = size.height - topPadding
+        
         return CGPoint(x: startX + CGFloat(col) * podSpacingX,
                        y: startY - CGFloat(row) * podSpacingY)
     }
 
     private func loungePosition(for name: String) -> CGPoint {
-        let hash = abs(name.hashValue)
-        let lx = size.width - 240 + 40 + CGFloat(hash % 140)
-        let ly = size.height - 180 + 40 + CGFloat((hash / 10) % 100)
-        return CGPoint(x: lx, y: ly)
+        let idleNames = pods.filter { $0.value.state == .idle }.keys.sorted()
+        let idx = idleNames.firstIndex(of: name) ?? 0
+
+        let loungeW: CGFloat = 190
+        let startX = size.width - loungeW + 35
+        let startY = size.height - 160
+
+        let col = idx % 2
+        let row = idx / 2
+
+        let px = startX + CGFloat(col) * 70
+        let py = startY - CGFloat(row) * 75
+        
+        return CGPoint(x: px, y: py)
     }
 
     // MARK: - Public API ───────────────────────────────────────────────
@@ -516,7 +554,10 @@ final class WarRoomScene: SKScene {
         pod.run(SKAction.sequence([
             SKAction.wait(forDuration: Double(index) * 0.07),
             dropIn
-        ]))
+        ])) { [weak self] in
+            // Re-organize idle pods layout once drop completed to keep list sorted
+            self?.relocateIdlePods()
+        }
     }
 
     func removeAgent(name: String) {
@@ -529,38 +570,35 @@ final class WarRoomScene: SKScene {
             ]),
             SKAction.removeFromParent()
         ])
-        pod.run(depart)
+        pod.run(depart) { [weak self] in
+            self?.relocateIdlePods()
+        }
     }
 
     func setAgentState(_ name: String, state: OfficeAgentState) {
         guard let pod = pods[name] else { return }
-        
         pod.setState(state)
 
-        // 1. Assign proper homePosition coordinates based on State
         var newHome = pod.homePosition
         switch state {
         case .idle:
             newHome = loungePosition(for: name)
         case .working, .speaking, .waiting:
-            // Regress to assigned developer desk
             if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
                 newHome = gridPosition(for: idx)
             }
         case .debating:
-            // Assigned via circular seats in startDebate()
             return
         }
 
         pod.homePosition = newHome
 
-        // 2. Perform smooth walking movement (wobble) to newHome
         if !pod.isBeingDragged && pod.position != newHome {
             pod.removeAction(forKey: "walk")
             pod.removeAction(forKey: "wobble")
 
             let dist = hypot(pod.position.x - newHome.x, pod.position.y - newHome.y)
-            let dur = max(0.5, Double(dist) / 180.0) // 180 px/sec walking speed
+            let dur = max(0.5, Double(dist) / 180.0)
 
             let walk = SKAction.move(to: newHome, duration: dur)
             walk.timingMode = .easeInEaseOut
@@ -575,10 +613,45 @@ final class WarRoomScene: SKScene {
                 pod.removeAction(forKey: "wobble")
                 pod.zRotation = 0
                 pod.setState(pod.state)
+                
+                if state == .idle {
+                    self.relocateIdlePods()
+                }
             }
 
             pod.run(wobble, withKey: "wobble")
             pod.run(SKAction.sequence([walk, completion]), withKey: "walk")
+        }
+    }
+
+    private func relocateIdlePods() {
+        for (name, pod) in pods {
+            guard pod.state == .idle && !pod.isBeingDragged else { continue }
+            let targetPos = loungePosition(for: name)
+            if pod.homePosition != targetPos {
+                pod.homePosition = targetPos
+                
+                pod.removeAction(forKey: "walk")
+                pod.removeAction(forKey: "wobble")
+                
+                let walk = SKAction.move(to: targetPos, duration: 0.5)
+                walk.timingMode = .easeInEaseOut
+                
+                let wobble = SKAction.repeatForever(SKAction.sequence([
+                    SKAction.rotate(toAngle: 0.06, duration: 0.12),
+                    SKAction.rotate(toAngle: -0.06, duration: 0.12)
+                ]))
+                
+                let completion = SKAction.run { [weak pod] in
+                    guard let pod = pod else { return }
+                    pod.removeAction(forKey: "wobble")
+                    pod.zRotation = 0
+                    pod.setState(.idle)
+                }
+                
+                pod.run(wobble, withKey: "wobble")
+                pod.run(SKAction.sequence([walk, completion]), withKey: "walk")
+            }
         }
     }
 
@@ -600,7 +673,6 @@ final class WarRoomScene: SKScene {
                     pod.isBeingDragged = true
                     pod.returnTask?.cancel()
 
-                    // Enable dynamic physics to crash into other pods
                     pod.physicsBody?.isDynamic = true
                     pod.physicsBody?.affectedByGravity = false
                     pod.physicsBody?.velocity = .zero
@@ -621,7 +693,6 @@ final class WarRoomScene: SKScene {
         guard let pod = selectedPodForDrag else { return }
         let location = event.location(in: self)
 
-        // Move to mouse position
         pod.position = location
 
         let dt = event.timestamp - lastDragTime
@@ -641,7 +712,6 @@ final class WarRoomScene: SKScene {
         selectedPodForDrag = nil
         pod.endGrabAnimation()
 
-        // Toss with force physics impulse
         let velocityMultiplier: CGFloat = 0.05
         let impulse = CGVector(
             dx: dragStartVelocity.x * velocityMultiplier,
@@ -649,7 +719,6 @@ final class WarRoomScene: SKScene {
         )
         pod.physicsBody?.applyImpulse(impulse)
 
-        // Return home walk after 2.5 seconds
         triggerReturnHome(for: pod)
     }
 
@@ -667,7 +736,6 @@ final class WarRoomScene: SKScene {
                 pod.physicsBody?.angularVelocity = 0
                 pod.zRotation = 0
 
-                // Particle trace trail back home
                 self.addWarpTrail(to: pod, destination: pod.homePosition, duration: 0.15)
 
                 let walk = SKAction.move(to: pod.homePosition, duration: 1.0)
@@ -698,7 +766,6 @@ final class WarRoomScene: SKScene {
         isDebateActive = true
         currentDebateParticipants = participants
 
-        // Materialise the table
         let table = buildDebateTable()
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         table.position = center
@@ -711,7 +778,6 @@ final class WarRoomScene: SKScene {
             SKAction.fadeIn(withDuration: 0.7)
         ]))
 
-        // Warp and slide participants to circular debate seats
         let radius: CGFloat = 185
         for (i, name) in participants.enumerated() {
             guard let pod = pods[name] else { continue }
@@ -742,17 +808,15 @@ final class WarRoomScene: SKScene {
         let participants = currentDebateParticipants
         currentDebateParticipants = []
 
-        // Dismiss the table
         debateTable?.run(SKAction.sequence([
             SKAction.fadeOut(withDuration: 0.5),
             SKAction.removeFromParent()
         ]))
         debateTable = nil
 
-        // Slide agents back to home positions
         for (i, name) in participants.enumerated() {
             guard let pod = pods[name] else { continue }
-            let home = loungePosition(for: name) // Return to rest Lounge
+            let home = loungePosition(for: name)
             pod.homePosition = home
             let warpHome = SKAction.sequence([
                 SKAction.wait(forDuration: Double(i) * 0.1 + 0.3),
@@ -819,7 +883,6 @@ final class WarRoomScene: SKScene {
     override func update(_ currentTime: TimeInterval) {
         super.update(currentTime)
 
-        // Clear old debate lasers
         debateLaserContainer.removeAllChildren()
 
         guard isDebateActive else { return }
@@ -859,21 +922,18 @@ final class WarRoomScene: SKScene {
     private func buildDebateTable() -> SKNode {
         let container = SKNode()
 
-        // Outer ambient glow
         let outerRing = SKShapeNode(ellipseOf: CGSize(width: 400, height: 252))
         outerRing.fillColor = SKColor.cyan.withAlphaComponent(0.04)
         outerRing.strokeColor = SKColor.cyan.withAlphaComponent(0.12)
         outerRing.lineWidth = 2
         container.addChild(outerRing)
 
-        // Table surface
         let table = SKShapeNode(ellipseOf: CGSize(width: 320, height: 200))
         table.fillColor = SKColor.white.withAlphaComponent(0.035)
         table.strokeColor = SKColor.cyan.withAlphaComponent(0.55)
         table.lineWidth = 1.5
         container.addChild(table)
 
-        // Center beacon
         let beacon = SKShapeNode(circleOfRadius: 14)
         beacon.fillColor = SKColor.cyan.withAlphaComponent(0.25)
         beacon.strokeColor = SKColor.cyan.withAlphaComponent(0.7)
@@ -885,7 +945,6 @@ final class WarRoomScene: SKScene {
         beacon.run(pulse)
         container.addChild(beacon)
 
-        // Dashed orbit ring
         let orbit = SKShapeNode(circleOfRadius: 38)
         orbit.fillColor = .clear
         orbit.strokeColor = SKColor.cyan.withAlphaComponent(0.2)
@@ -893,7 +952,6 @@ final class WarRoomScene: SKScene {
         orbit.run(SKAction.repeatForever(SKAction.rotate(byAngle: .pi * 2, duration: 8)))
         container.addChild(orbit)
 
-        // Label
         let label = SKLabelNode(text: "⚔ WAR ROOM ⚔")
         label.fontName  = "SFMono-Regular"
         label.fontSize  = 10
