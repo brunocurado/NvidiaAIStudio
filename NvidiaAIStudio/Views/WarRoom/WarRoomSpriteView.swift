@@ -7,6 +7,8 @@ struct WarRoomSpriteView: View {
     @Environment(AppState.self) private var appState
 
     // Live SwiftData queries — the single source of truth
+    @Query(sort: \AgentPersona.name) private var allPersonas: [AgentPersona]
+
     @Query(
         filter: #Predicate<SwarmTask> { $0.status == "running" || $0.status == "pending" },
         sort: \SwarmTask.createdAt, order: .reverse
@@ -37,8 +39,8 @@ struct WarRoomSpriteView: View {
                 SpriteView(scene: scene, options: [.allowsTransparency])
                     .ignoresSafeArea()
 
-                // ── Empty state (no tasks) ────────────────────────────
-                if activeTasks.isEmpty {
+                // ── Empty state (only if there are no agents registered) ────────────
+                if allPersonas.isEmpty {
                     emptyStateOverlay
                 }
 
@@ -50,9 +52,12 @@ struct WarRoomSpriteView: View {
             }
             .onAppear { scene.size = geo.size }
             .onChange(of: geo.size) { _, s in scene.size = s }
-            // Sync all agents whenever any task changes
-            .onChange(of: activeTasks, initial: true) { _, tasks in
-                syncAgents(tasks: tasks)
+            // Sync all agents whenever task or persona list changes
+            .onChange(of: activeTasks) { _, tasks in
+                syncAgents(personas: allPersonas, tasks: tasks)
+            }
+            .onChange(of: allPersonas, initial: true) { _, personas in
+                syncAgents(personas: personas, tasks: activeTasks)
             }
             // Debate lifecycle
             .onChange(of: activeDebates.first?.id, initial: true) { oldID, newID in
@@ -147,7 +152,7 @@ struct WarRoomSpriteView: View {
                     } else if running > 0 {
                         Text("\(running) working\(pending > 0 ? " · \(pending) queued" : "")")
                     } else {
-                        Text("Standby")
+                        Text("Virtual Office — \(allPersonas.count) agent\(allPersonas.count == 1 ? "" : "s") on standby")
                     }
                 }
                 .font(.system(size: 11, weight: .medium))
@@ -165,39 +170,56 @@ struct WarRoomSpriteView: View {
 
     // MARK: - Agent Sync
 
-    private func syncAgents(tasks: [SwarmTask]) {
-        let activeNames = Set(tasks.compactMap { $0.assignedAgent?.name })
+    private func syncAgents(personas: [AgentPersona], tasks: [SwarmTask]) {
+        var activeTaskMap: [String: SwarmTask] = [:]
+        for t in tasks {
+            if let agent = t.assignedAgent {
+                activeTaskMap[agent.name] = t
+            }
+        }
 
-        // Spawn new agents and update their states
-        var idx = scene.pods.count
-        for (taskIdx, task) in tasks.enumerated() {
-            guard let persona = task.assignedAgent else { continue }
-
+        // Spawn/update all personas
+        for (idx, persona) in personas.enumerated() {
             if scene.pods[persona.name] == nil {
                 scene.spawnAgent(
                     name: persona.name,
                     role: persona.roleName,
                     accentHex: persona.accentColorHex,
-                    index: taskIdx
+                    index: idx
                 )
-                idx += 1
             }
 
-            // Set correct state based on task status
-            let inDebate = activeDebates.contains { $0.id == task.id }
+            // Determine correct state and destination
+            let activeTask = activeTaskMap[persona.name]
+            let inDebate = activeDebates.first != nil && (
+                activeDebates.first?.assignedAgent?.name == persona.name ||
+                activeDebates.first?.debateOpponent?.name == persona.name ||
+                (activeDebates.first?.additionalOpponentNames.contains(persona.name) ?? false)
+            )
+
             if inDebate {
                 scene.setAgentState(persona.name, state: .debating)
-            } else if task.status == "pending" {
-                // Show who they're waiting for (could be the previous task's agent)
-                let blockedBy = tasks.first(where: { $0.status == "running" })?.assignedAgent?.name ?? "queue"
-                scene.setAgentState(persona.name, state: .waiting(for: blockedBy))
+            } else if let task = activeTask {
+                if task.status == "pending" {
+                    let blockedBy = tasks.first(where: { $0.status == "running" })?.assignedAgent?.name ?? "queue"
+                    scene.setAgentState(persona.name, state: .waiting(for: blockedBy))
+                } else {
+                    scene.setAgentState(persona.name, state: .working)
+                }
+
+                // Sincronizar o último log do terminal
+                if task.status == "running", let lastLog = task.logs.last {
+                    let cleanLog = lastLog.replacingOccurrences(of: "\\[\\d{2}:\\d{2}:\\d{2}\\] ", with: "", options: .regularExpression)
+                    scene.updateTerminalLog(for: persona.name, text: cleanLog)
+                }
             } else {
-                scene.setAgentState(persona.name, state: .working)
+                scene.setAgentState(persona.name, state: .idle)
             }
         }
 
-        // Remove agents whose tasks are completely gone
-        for name in Array(scene.pods.keys) where !activeNames.contains(name) {
+        // Clean up deleted personas
+        let personaNames = Set(personas.map { $0.name })
+        for name in Array(scene.pods.keys) where !personaNames.contains(name) {
             scene.removeAgent(name: name)
         }
     }

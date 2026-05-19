@@ -41,16 +41,10 @@ final class AgentPodNode: SKNode {
     let accentColor: SKColor
     var homePosition: CGPoint = .zero
     private(set) var state: OfficeAgentState = .idle
-
-    // MARK: Terminal fake text (cycles to simulate activity)
-    private let terminalLines = [
-        "▶ Analysing requirements...",
-        "▶ Compiling strategy matrix...",
-        "▶ Processing token stream...",
-        "▶ Evaluating trade-offs...",
-        "▶ Synthesizing output..."
-    ]
-    private var terminalLineIndex = 0
+    
+    // Physical state
+    var isBeingDragged = false
+    var returnTask: Task<Void, Never>? = nil
 
     // MARK: Init
     init(name: String, role: String, accentHex: String) {
@@ -153,6 +147,16 @@ final class AgentPodNode: SKNode {
         addChild(terminalNode)
         terminalNode.addChild(terminalText)
 
+        // Physics Body for satisfying drag-and-throw collisions
+        let body = SKPhysicsBody(circleOfRadius: 46)
+        body.isDynamic = false // Static by default, turned active on drag/throw
+        body.affectedByGravity = false
+        body.allowsRotation = false
+        body.restitution = 0.8 // Satisfying bouncy glass pods
+        body.friction = 0.1
+        body.linearDamping = 0.6
+        self.physicsBody = body
+
         layout()
         startIdleBreathe()
     }
@@ -182,6 +186,18 @@ final class AgentPodNode: SKNode {
             ]))
         ])
         cropNode.run(breathe, withKey: "breathe")
+    }
+
+    // MARK: - Drag Animation Encapsulation
+
+    func startGrabAnimation() {
+        cropNode.removeAction(forKey: "breathe")
+        cropNode.removeAction(forKey: "bounce")
+        cropNode.run(SKAction.scale(to: 1.12, duration: 0.15))
+    }
+
+    func endGrabAnimation() {
+        cropNode.run(SKAction.scale(to: 1.0, duration: 0.15))
     }
 
     // MARK: - State transitions
@@ -280,24 +296,17 @@ final class AgentPodNode: SKNode {
 
     private func showTerminal() {
         terminalNode.run(SKAction.fadeIn(withDuration: 0.4))
-        scrollTerminal()
     }
 
     private func hideTerminal() {
         terminalNode.run(SKAction.fadeOut(withDuration: 0.3))
-        terminalNode.removeAction(forKey: "terminal_scroll")
     }
 
-    private func scrollTerminal() {
-        let update = SKAction.run { [weak self] in
-            guard let self else { return }
-            self.terminalText.text = self.terminalLines[self.terminalLineIndex % self.terminalLines.count]
-            self.terminalLineIndex += 1
+    func updateLogText(_ text: String) {
+        terminalText.text = "▶ \(text)"
+        if terminalNode.alpha == 0 {
+            terminalNode.run(SKAction.fadeIn(withDuration: 0.4))
         }
-        let wait = SKAction.wait(forDuration: 1.8)
-        terminalNode.run(SKAction.repeatForever(SKAction.sequence([update, wait])), withKey: "terminal_scroll")
-        // Run first tick immediately
-        terminalText.text = terminalLines[0]
     }
 }
 
@@ -310,10 +319,17 @@ final class WarRoomScene: SKScene {
     private(set) var pods: [String: AgentPodNode] = [:]
     private var layoutCounter: Int = 0
 
-    // MARK: Debate table
+    // MARK: Debate table & Data streams
     private var debateTable: SKNode?
     private var isDebateActive = false
     private var currentDebateParticipants: [String] = []
+    private var debateLaserContainer = SKNode()
+
+    // MARK: Dragging support
+    private var selectedPodForDrag: AgentPodNode? = nil
+    private var dragStartVelocity: CGPoint = .zero
+    private var lastDragTime: TimeInterval = 0
+    private var lastDragPos: CGPoint = .zero
 
     // MARK: Layout constants
     private let columns        = 4
@@ -326,6 +342,26 @@ final class WarRoomScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = SKColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
         setupBackground()
+
+        // Define screen borders for physics bounce
+        self.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(origin: .zero, size: self.size))
+        self.physicsBody?.restitution = 0.8
+        self.physicsBody?.friction = 0.1
+        self.physicsBody?.categoryBitMask = 1
+
+        // Add laser container
+        debateLaserContainer.zPosition = -2
+        addChild(debateLaserContainer)
+
+        // Enable user interaction
+        isUserInteractionEnabled = true
+    }
+
+    override func didChangeSize(_ oldSize: CGSize) {
+        super.didChangeSize(oldSize)
+        self.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(origin: .zero, size: self.size))
+        self.physicsBody?.restitution = 0.8
+        self.physicsBody?.friction = 0.1
     }
 
     private func setupBackground() {
@@ -361,6 +397,73 @@ final class WarRoomScene: SKScene {
             addChild(g)
         }
 
+        // ── Rest Lounge Area Decoration ────────────────────────────────
+        let loungeW: CGFloat = 220, loungeH: CGFloat = 165
+        let loungeRect = SKShapeNode(rectOf: CGSize(width: loungeW, height: loungeH), cornerRadius: 16)
+        loungeRect.fillColor = SKColor.magenta.withAlphaComponent(0.025)
+        loungeRect.strokeColor = SKColor.magenta.withAlphaComponent(0.12)
+        loungeRect.lineWidth = 1.5
+        loungeRect.position = CGPoint(x: size.width - loungeW/2 - 20, y: size.height - loungeH/2 - 20)
+        loungeRect.name = "lounge_bg"
+        loungeRect.zPosition = -6
+        addChild(loungeRect)
+
+        let loungeLabel = SKLabelNode(text: "☕ REST LOUNGE")
+        loungeLabel.fontName = "SFProDisplay-Bold"
+        loungeLabel.fontSize = 9
+        loungeLabel.fontColor = SKColor.magenta.withAlphaComponent(0.3)
+        loungeLabel.position = CGPoint(x: 0, y: loungeH/2 - 22)
+        loungeRect.addChild(loungeLabel)
+
+        // Lounge bubble emitters (steam/coffee ambient effect)
+        let steamEmitter = SKEmitterNode()
+        steamEmitter.particleBirthRate = 3
+        steamEmitter.particleLifetime = 4.0
+        steamEmitter.particlePositionRange = CGVector(dx: loungeW - 40, dy: 10)
+        steamEmitter.particleSpeed = 10
+        steamEmitter.particleSpeedRange = 5
+        steamEmitter.emissionAngle = .pi / 2
+        steamEmitter.particleScale = 0.08
+        steamEmitter.particleScaleRange = 0.05
+        steamEmitter.particleAlpha = 0.15
+        steamEmitter.particleAlphaSpeed = -0.05
+        steamEmitter.particleColor = .magenta
+        steamEmitter.position = CGPoint(x: 0, y: -loungeH/2 + 20)
+        loungeRect.addChild(steamEmitter)
+
+        // ── Desks (transparent shells under grid positions) ──────────
+        for i in 0..<8 {
+            let pos = gridPosition(for: i)
+            let desk = SKShapeNode(rectOf: CGSize(width: 116, height: 60), cornerRadius: 8)
+            desk.fillColor = SKColor.cyan.withAlphaComponent(0.012)
+            desk.strokeColor = SKColor.cyan.withAlphaComponent(0.06)
+            desk.lineWidth = 1
+            desk.position = CGPoint(x: pos.x, y: pos.y - 20)
+            desk.zPosition = -5
+            addChild(desk)
+
+            // Screen glow symbol
+            let screen = SKShapeNode(rectOf: CGSize(width: 22, height: 14), cornerRadius: 2)
+            screen.fillColor = SKColor.cyan.withAlphaComponent(0.08)
+            screen.strokeColor = SKColor.cyan.withAlphaComponent(0.25)
+            screen.lineWidth = 1
+            screen.position = CGPoint(x: 0, y: 10)
+            desk.addChild(screen)
+
+            let stand = SKShapeNode(rectOf: CGSize(width: 8, height: 4))
+            stand.fillColor = SKColor.cyan.withAlphaComponent(0.2)
+            stand.strokeColor = .clear
+            stand.position = CGPoint(x: 0, y: 0)
+            desk.addChild(stand)
+
+            let label = SKLabelNode(text: "DESK \(i+1)")
+            label.fontName = "SFProText-Regular"
+            label.fontSize = 6
+            label.fontColor = SKColor.cyan.withAlphaComponent(0.22)
+            label.position = CGPoint(x: 0, y: -20)
+            desk.addChild(label)
+        }
+
         // ── "NVIDIA AI STUDIO" watermark ──────────────────────────────
         let watermark = SKLabelNode(text: "NVIDIA AI STUDIO — COMMAND CENTER")
         watermark.fontName = "SFMono-Regular"
@@ -371,7 +474,7 @@ final class WarRoomScene: SKScene {
         addChild(watermark)
     }
 
-    // MARK: - Pod Grid Position ────────────────────────────────────────
+    // MARK: - Location Calculators ─────────────────────────────────────
 
     private func gridPosition(for index: Int) -> CGPoint {
         let col = index % columns
@@ -383,18 +486,23 @@ final class WarRoomScene: SKScene {
                        y: startY - CGFloat(row) * podSpacingY)
     }
 
+    private func loungePosition(for name: String) -> CGPoint {
+        let hash = abs(name.hashValue)
+        let lx = size.width - 240 + 40 + CGFloat(hash % 140)
+        let ly = size.height - 180 + 40 + CGFloat((hash / 10) % 100)
+        return CGPoint(x: lx, y: ly)
+    }
+
     // MARK: - Public API ───────────────────────────────────────────────
 
-    /// Spawn a new agent pod. `index` determines grid slot.
     func spawnAgent(name: String, role: String, accentHex: String, index: Int) {
         guard pods[name] == nil else { return }
 
         let pod = AgentPodNode(name: name, role: role, accentHex: accentHex)
-        let target = gridPosition(for: index)
+        let target = loungePosition(for: name)
         pod.homePosition = target
         pod.zPosition = 1
 
-        // Drop-in animation from above
         pod.position = CGPoint(x: target.x, y: size.height + 80)
         pod.alpha = 0
         addChild(pod)
@@ -411,7 +519,6 @@ final class WarRoomScene: SKScene {
         ]))
     }
 
-    /// Remove an agent pod with a departure animation.
     func removeAgent(name: String) {
         guard let pod = pods[name] else { return }
         pods.removeValue(forKey: name)
@@ -425,9 +532,163 @@ final class WarRoomScene: SKScene {
         pod.run(depart)
     }
 
-    /// Update a single agent's visual state.
     func setAgentState(_ name: String, state: OfficeAgentState) {
-        pods[name]?.setState(state)
+        guard let pod = pods[name] else { return }
+        
+        pod.setState(state)
+
+        // 1. Assign proper homePosition coordinates based on State
+        var newHome = pod.homePosition
+        switch state {
+        case .idle:
+            newHome = loungePosition(for: name)
+        case .working, .speaking, .waiting:
+            // Regress to assigned developer desk
+            if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
+                newHome = gridPosition(for: idx)
+            }
+        case .debating:
+            // Assigned via circular seats in startDebate()
+            return
+        }
+
+        pod.homePosition = newHome
+
+        // 2. Perform smooth walking movement (wobble) to newHome
+        if !pod.isBeingDragged && pod.position != newHome {
+            pod.removeAction(forKey: "walk")
+            pod.removeAction(forKey: "wobble")
+
+            let dist = hypot(pod.position.x - newHome.x, pod.position.y - newHome.y)
+            let dur = max(0.5, Double(dist) / 180.0) // 180 px/sec walking speed
+
+            let walk = SKAction.move(to: newHome, duration: dur)
+            walk.timingMode = .easeInEaseOut
+
+            let wobble = SKAction.repeatForever(SKAction.sequence([
+                SKAction.rotate(toAngle: 0.06, duration: 0.12),
+                SKAction.rotate(toAngle: -0.06, duration: 0.12)
+            ]))
+
+            let completion = SKAction.run { [weak pod] in
+                guard let pod = pod else { return }
+                pod.removeAction(forKey: "wobble")
+                pod.zRotation = 0
+                pod.setState(pod.state)
+            }
+
+            pod.run(wobble, withKey: "wobble")
+            pod.run(SKAction.sequence([walk, completion]), withKey: "walk")
+        }
+    }
+
+    func updateTerminalLog(for agentName: String, text: String) {
+        pods[agentName]?.updateLogText(text)
+    }
+
+    // MARK: - Drag & Toss Physics (macOS mouse handlers) ──────────────────
+
+    override func mouseDown(with event: NSEvent) {
+        let location = event.location(in: self)
+        let touchedNodes = nodes(at: location)
+
+        for node in touchedNodes {
+            var current: SKNode? = node
+            while current != nil {
+                if let pod = current as? AgentPodNode {
+                    selectedPodForDrag = pod
+                    pod.isBeingDragged = true
+                    pod.returnTask?.cancel()
+
+                    // Enable dynamic physics to crash into other pods
+                    pod.physicsBody?.isDynamic = true
+                    pod.physicsBody?.affectedByGravity = false
+                    pod.physicsBody?.velocity = .zero
+                    pod.physicsBody?.angularVelocity = 0
+
+                    pod.startGrabAnimation()
+
+                    lastDragPos = location
+                    lastDragTime = event.timestamp
+                    return
+                }
+                current = current?.parent
+            }
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let pod = selectedPodForDrag else { return }
+        let location = event.location(in: self)
+
+        // Move to mouse position
+        pod.position = location
+
+        let dt = event.timestamp - lastDragTime
+        if dt > 0 {
+            dragStartVelocity = CGPoint(
+                x: (location.x - lastDragPos.x) / CGFloat(dt),
+                y: (location.y - lastDragPos.y) / CGFloat(dt)
+            )
+        }
+        lastDragPos = location
+        lastDragTime = event.timestamp
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let pod = selectedPodForDrag else { return }
+        pod.isBeingDragged = false
+        selectedPodForDrag = nil
+        pod.endGrabAnimation()
+
+        // Toss with force physics impulse
+        let velocityMultiplier: CGFloat = 0.05
+        let impulse = CGVector(
+            dx: dragStartVelocity.x * velocityMultiplier,
+            dy: dragStartVelocity.y * velocityMultiplier
+        )
+        pod.physicsBody?.applyImpulse(impulse)
+
+        // Return home walk after 2.5 seconds
+        triggerReturnHome(for: pod)
+    }
+
+    private func triggerReturnHome(for pod: AgentPodNode) {
+        pod.returnTask?.cancel()
+        pod.returnTask = Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self, weak pod] in
+                guard let self = self, let pod = pod else { return }
+                guard !pod.isBeingDragged else { return }
+
+                pod.physicsBody?.isDynamic = false
+                pod.physicsBody?.velocity = .zero
+                pod.physicsBody?.angularVelocity = 0
+                pod.zRotation = 0
+
+                // Particle trace trail back home
+                self.addWarpTrail(to: pod, destination: pod.homePosition, duration: 0.15)
+
+                let walk = SKAction.move(to: pod.homePosition, duration: 1.0)
+                walk.timingMode = .easeInEaseOut
+
+                let wobble = SKAction.repeatForever(SKAction.sequence([
+                    SKAction.rotate(toAngle: 0.06, duration: 0.12),
+                    SKAction.rotate(toAngle: -0.06, duration: 0.12)
+                ]))
+
+                let completion = SKAction.run { [weak pod] in
+                    guard let pod = pod else { return }
+                    pod.removeAction(forKey: "wobble")
+                    pod.zRotation = 0
+                    pod.setState(pod.state)
+                }
+
+                pod.run(wobble, withKey: "wobble")
+                pod.run(SKAction.sequence([walk, completion]))
+            }
+        }
     }
 
     // MARK: - Debate Mode ──────────────────────────────────────────────
@@ -450,7 +711,7 @@ final class WarRoomScene: SKScene {
             SKAction.fadeIn(withDuration: 0.7)
         ]))
 
-        // Warp participants to table seats
+        // Warp and slide participants to circular debate seats
         let radius: CGFloat = 185
         for (i, name) in participants.enumerated() {
             guard let pod = pods[name] else { continue }
@@ -458,15 +719,17 @@ final class WarRoomScene: SKScene {
             let seat = CGPoint(x: center.x + cos(angle) * radius,
                                y: center.y + sin(angle) * (radius * 0.62))
 
+            pod.homePosition = seat
             let warp = SKAction.sequence([
                 SKAction.wait(forDuration: Double(i) * 0.12 + 0.4),
                 SKAction.run { [weak self, weak pod] in
                     guard let self = self, let pod = pod else { return }
-                    self.addWarpTrail(to: pod, destination: seat, duration: 0.18)
+                    self.addWarpTrail(to: pod, destination: seat, duration: 0.5)
                 },
-                SKAction.scale(to: 0.25, duration: 0.18),
-                SKAction.move(to: seat, duration: 0),
-                SKAction.scale(to: 1, duration: 0.38)
+                SKAction.group([
+                    SKAction.move(to: seat, duration: 0.5),
+                    SKAction.scale(to: 1.05, duration: 0.5)
+                ])
             ])
             warp.timingMode = .easeOut
             pod.run(warp) { [weak pod] in pod?.setState(.debating) }
@@ -486,30 +749,31 @@ final class WarRoomScene: SKScene {
         ]))
         debateTable = nil
 
-        // Warp agents back to home
+        // Slide agents back to home positions
         for (i, name) in participants.enumerated() {
             guard let pod = pods[name] else { continue }
-            let home = pod.homePosition
+            let home = loungePosition(for: name) // Return to rest Lounge
+            pod.homePosition = home
             let warpHome = SKAction.sequence([
                 SKAction.wait(forDuration: Double(i) * 0.1 + 0.3),
                 SKAction.run { [weak self, weak pod] in
                     guard let self = self, let pod = pod else { return }
-                    self.addWarpTrail(to: pod, destination: home, duration: 0.18)
+                    self.addWarpTrail(to: pod, destination: home, duration: 0.5)
                 },
-                SKAction.scale(to: 0.25, duration: 0.18),
-                SKAction.move(to: home, duration: 0),
-                SKAction.scale(to: 1, duration: 0.4)
+                SKAction.group([
+                    SKAction.move(to: home, duration: 0.5),
+                    SKAction.scale(to: 1.0, duration: 0.5)
+                ])
             ])
             warpHome.timingMode = .easeOut
             pod.run(warpHome) { [weak pod] in pod?.setState(.idle) }
         }
     }
 
-    // MARK: - Visual Effects
+    // MARK: - Visual Effects ───────────────────────────────────────────
 
     private func addWarpTrail(to node: SKNode, destination: CGPoint, duration: TimeInterval) {
         let emitter = SKEmitterNode()
-        emitter.particleTexture = nil // Use circles
         emitter.particleBirthRate = 2000
         emitter.particleLifetime = 0.4
         emitter.particlePositionRange = CGVector(dx: 10, dy: 10)
@@ -520,12 +784,11 @@ final class WarRoomScene: SKScene {
         emitter.particleScaleRange = 0.1
         emitter.particleAlpha = 0.8
         emitter.particleAlphaSpeed = -2.0
-        emitter.particleColorSequence = nil
         emitter.particleColor = .cyan
         emitter.particleColorBlendFactor = 1.0
         
         emitter.position = node.position
-        emitter.zPosition = -1 // Behind pods
+        emitter.zPosition = -1
         addChild(emitter)
         
         let move = SKAction.move(to: destination, duration: duration)
@@ -533,6 +796,62 @@ final class WarRoomScene: SKScene {
         let remove = SKAction.removeFromParent()
         
         emitter.run(SKAction.sequence([SKAction.group([move, fadeOut]), remove]))
+    }
+
+    private func emitSpark(from start: CGPoint, to end: CGPoint) {
+        let spark = SKShapeNode(circleOfRadius: 2.0)
+        spark.fillColor = .cyan
+        spark.strokeColor = .clear
+        spark.position = start
+        spark.zPosition = -1
+        addChild(spark)
+
+        let move = SKAction.move(to: end, duration: 0.45)
+        let fade = SKAction.fadeOut(withDuration: 0.45)
+        let remove = SKAction.removeFromParent()
+
+        spark.run(SKAction.sequence([
+            SKAction.group([move, fade]),
+            remove
+        ]))
+    }
+
+    override func update(_ currentTime: TimeInterval) {
+        super.update(currentTime)
+
+        // Clear old debate lasers
+        debateLaserContainer.removeAllChildren()
+
+        guard isDebateActive else { return }
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+
+        for name in currentDebateParticipants {
+            guard let pod = pods[name] else { continue }
+
+            let path = CGMutablePath()
+            path.move(to: pod.position)
+            path.addLine(to: center)
+
+            let laser = SKShapeNode(path: path)
+            let baseColor = pod.accentColor
+
+            if pod.state == .speaking {
+                laser.strokeColor = baseColor
+                laser.lineWidth = 2.0
+                
+                let alpha = 0.6 + CGFloat(sin(currentTime * 12.0)) * 0.25
+                laser.alpha = alpha
+
+                if Double.random(in: 0...1) < 0.25 {
+                    emitSpark(from: pod.position, to: center)
+                }
+            } else {
+                laser.strokeColor = baseColor.withAlphaComponent(0.22)
+                laser.lineWidth = 1.0
+            }
+
+            debateLaserContainer.addChild(laser)
+        }
     }
 
     // MARK: - Debate Table Builder ─────────────────────────────────────
