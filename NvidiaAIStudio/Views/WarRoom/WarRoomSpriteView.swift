@@ -59,25 +59,11 @@ struct WarRoomSpriteView: View {
             .onChange(of: allPersonas, initial: true) { _, personas in
                 syncAgents(personas: personas, tasks: activeTasks)
             }
-            // Debate lifecycle
-            .onChange(of: activeDebates.first?.id, initial: true) { oldID, newID in
-                let debateStarted: Bool = newID != nil && oldID != newID
-                let debateEnded: Bool   = newID == nil && oldID != nil
-
-                if debateStarted, let debate = activeDebates.first {
-                    var names: [String] = [debate.assignedAgent?.name].compactMap { $0 }
-                    if let opp = debate.debateOpponent?.name { names.append(opp) }
-                    names.append(contentsOf: debate.additionalOpponentNames)
-                    scene.startDebate(participants: names)
-                } else if debateEnded {
-                    scene.endDebate()
-                }
-            }
             // Active speaker bounce
             .onChange(of: appState.orchestrator.runningTasks.first?.agentName) { _, speakerName in
                 let inDebate = !activeDebates.isEmpty
-                for (name, pod) in scene.pods {
-                    if pod.state == .speaking {
+                for (name, _) in scene.pods {
+                    if scene.pods[name]?.state == .speaking {
                         scene.setAgentState(name, state: inDebate ? .debating : .working)
                     }
                 }
@@ -188,17 +174,42 @@ struct WarRoomSpriteView: View {
                     index: idx
                 )
             }
+        }
 
-            // Determine correct state and destination
+        // Resolve debate participants if any debate task is active
+        var debateParticipants: [String] = []
+        if let debate = activeDebates.first {
+            if let moderatorName = debate.assignedAgent?.name {
+                debateParticipants.append(moderatorName)
+            }
+            if let oppName = debate.debateOpponent?.name {
+                debateParticipants.append(oppName)
+            }
+            debateParticipants.append(contentsOf: debate.additionalOpponentNames)
+        }
+
+        // Handle scene-level debate start/end safely
+        if !debateParticipants.isEmpty {
+            if !scene.isDebateActive {
+                // Ensure all debate participants are fully spawned before triggering start
+                let allSpawned = debateParticipants.allSatisfy { scene.pods[$0] != nil }
+                if allSpawned {
+                    scene.startDebate(participants: debateParticipants)
+                }
+            }
+        } else if scene.isDebateActive {
+            scene.endDebate()
+        }
+
+        // Apply correct state & terminal logs
+        for persona in personas {
             let activeTask = activeTaskMap[persona.name]
-            let inDebate = activeDebates.first != nil && (
-                activeDebates.first?.assignedAgent?.name == persona.name ||
-                activeDebates.first?.debateOpponent?.name == persona.name ||
-                (activeDebates.first?.additionalOpponentNames.contains(persona.name) ?? false)
-            )
+            let inDebate = debateParticipants.contains(persona.name)
 
             if inDebate {
-                scene.setAgentState(persona.name, state: .debating)
+                // Keep the state as speaking if the agent is actively talking in the orchestrator
+                let isSpeaking = appState.orchestrator.runningTasks.first?.agentName == persona.name
+                scene.setAgentState(persona.name, state: isSpeaking ? .speaking : .debating)
             } else if let task = activeTask {
                 if task.status == "pending" {
                     let blockedBy = tasks.first(where: { $0.status == "running" })?.assignedAgent?.name ?? "queue"
@@ -207,7 +218,7 @@ struct WarRoomSpriteView: View {
                     scene.setAgentState(persona.name, state: .working)
                 }
 
-                // Sincronizar o último log do terminal
+                // Sync last terminal log line
                 if task.status == "running", let lastLog = task.logs.last {
                     let cleanLog = lastLog.replacingOccurrences(of: "\\[\\d{2}:\\d{2}:\\d{2}\\] ", with: "", options: .regularExpression)
                     scene.updateTerminalLog(for: persona.name, text: cleanLog)

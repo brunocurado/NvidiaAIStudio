@@ -318,7 +318,7 @@ final class WarRoomScene: SKScene {
 
     // MARK: Debate table & Data streams
     private var debateTable: SKNode?
-    private var isDebateActive = false
+    private(set) var isDebateActive = false
     private var currentDebateParticipants: [String] = []
     private var debateLaserContainer = SKNode()
 
@@ -378,6 +378,16 @@ final class WarRoomScene: SKScene {
             let targetPos: CGPoint
             if pod.state == .idle {
                 targetPos = loungePosition(for: name)
+            } else if pod.state == .debating || (isDebateActive && currentDebateParticipants.contains(name)) {
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                let radius: CGFloat = 185
+                if let idx = currentDebateParticipants.firstIndex(of: name) {
+                    let angle = CGFloat(idx) / CGFloat(max(currentDebateParticipants.count, 1)) * 2 * .pi - .pi / 2
+                    targetPos = CGPoint(x: center.x + cos(angle) * radius,
+                                       y: center.y + sin(angle) * (radius * 0.62))
+                } else {
+                    targetPos = pod.homePosition
+                }
             } else if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
                 targetPos = gridPosition(for: idx)
             } else {
@@ -387,6 +397,10 @@ final class WarRoomScene: SKScene {
             if !pod.isBeingDragged {
                 pod.position = targetPos
             }
+        }
+
+        if let table = debateTable {
+            table.position = CGPoint(x: size.width / 2, y: size.height / 2)
         }
     }
 
@@ -584,11 +598,14 @@ final class WarRoomScene: SKScene {
         case .idle:
             newHome = loungePosition(for: name)
         case .working, .speaking, .waiting:
-            if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
-                newHome = gridPosition(for: idx)
+            if !isDebateActive {
+                if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
+                    newHome = gridPosition(for: idx)
+                }
             }
         case .debating:
-            return
+            // The homePosition circular coordinates are computed in startDebate()
+            break
         }
 
         pod.homePosition = newHome
