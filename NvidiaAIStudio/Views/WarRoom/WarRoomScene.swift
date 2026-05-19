@@ -197,8 +197,11 @@ final class AgentPodNode: SKNode {
 
         cropNode.removeAction(forKey: "breathe")
         cropNode.removeAction(forKey: "bounce")
+        cropNode.removeAction(forKey: "typing_animation")
+        cropNode.zRotation = 0
         removeAction(forKey: "glow_pulse")
         childNode(withName: "waiting_balloon")?.removeFromParent()
+        childNode(withName: "coding_particles")?.removeFromParent()
 
         switch newState {
         case .idle:
@@ -234,6 +237,15 @@ final class AgentPodNode: SKNode {
                 showGlowPulse()
                 showTerminal()
                 cropNode.run(SKAction.scale(to: 1.08, duration: 0.3))
+                
+                // Typing micro-wobble animation
+                let typeAction = SKAction.repeatForever(SKAction.sequence([
+                    SKAction.rotate(toAngle: 0.04, duration: 0.08),
+                    SKAction.rotate(toAngle: -0.04, duration: 0.08)
+                ]))
+                cropNode.run(typeAction, withKey: "typing_animation")
+                
+                showCodingParticles()
             } else if newState == .speaking {
                 showGlowPulse()
                 let bounce = SKAction.repeatForever(SKAction.sequence([
@@ -249,6 +261,31 @@ final class AgentPodNode: SKNode {
                 showWaitingBalloon(text: "Wait: \(blockedOn)")
             }
         }
+    }
+
+    private func showCodingParticles() {
+        childNode(withName: "coding_particles")?.removeFromParent()
+        
+        let emitter = SKEmitterNode()
+        emitter.name = "coding_particles"
+        
+        emitter.particleColorSequence = nil
+        emitter.particleColorBlendFactor = 1.0
+        emitter.particleColor = accentColor
+        emitter.particleBirthRate = 12
+        emitter.particleLifetime = 0.7
+        emitter.particleSpeed = 22
+        emitter.particleSpeedRange = 8
+        emitter.emissionAngle = .pi / 2
+        emitter.emissionAngleRange = 0.4
+        emitter.particleAlpha = 0.8
+        emitter.particleAlphaSpeed = -1.1
+        emitter.particleScale = 0.12
+        emitter.particleScaleRange = 0.05
+        emitter.position = CGPoint(x: 0, y: -46)
+        emitter.zPosition = 3
+        
+        addChild(emitter)
     }
 
     private func showWaitingBalloon(text: String) {
@@ -402,6 +439,10 @@ final class WarRoomScene: SKScene {
         if let table = debateTable {
             table.position = CGPoint(x: size.width / 2, y: size.height / 2)
         }
+
+        if let board = childNode(withName: "scrum_board") {
+            board.position = CGPoint(x: 120, y: size.height - 90)
+        }
     }
 
     private func setupBackground() {
@@ -476,6 +517,7 @@ final class WarRoomScene: SKScene {
         for i in 0..<8 {
             let pos = gridPosition(for: i)
             let desk = SKShapeNode(rectOf: CGSize(width: 116, height: 60), cornerRadius: 8)
+            desk.name = "desk_\(i)"
             desk.fillColor = SKColor.cyan.withAlphaComponent(0.012)
             desk.strokeColor = SKColor.cyan.withAlphaComponent(0.06)
             desk.lineWidth = 1
@@ -484,6 +526,7 @@ final class WarRoomScene: SKScene {
             addChild(desk)
 
             let screen = SKShapeNode(rectOf: CGSize(width: 22, height: 14), cornerRadius: 2)
+            screen.name = "screen"
             screen.fillColor = SKColor.cyan.withAlphaComponent(0.08)
             screen.strokeColor = SKColor.cyan.withAlphaComponent(0.25)
             screen.lineWidth = 1
@@ -503,6 +546,8 @@ final class WarRoomScene: SKScene {
             label.position = CGPoint(x: 0, y: -20)
             desk.addChild(label)
         }
+        
+        setupWhiteboard()
 
         let watermark = SKLabelNode(text: "NVIDIA AI STUDIO — COMMAND CENTER")
         watermark.fontName = "SFMono-Regular"
@@ -594,18 +639,30 @@ final class WarRoomScene: SKScene {
         pod.setState(state)
 
         var newHome = pod.homePosition
+        let idx = Array(pods.keys).sorted().firstIndex(of: name)
+
         switch state {
         case .idle:
             newHome = loungePosition(for: name)
+            if let index = idx {
+                updateDeskLighting(index: index, active: false)
+            }
+            updatePostIt(for: name, state: state, color: pod.accentColor)
+
         case .working, .speaking, .waiting:
             if !isDebateActive {
-                if let idx = Array(pods.keys).sorted().firstIndex(of: name) {
-                    newHome = gridPosition(for: idx)
+                if let index = idx {
+                    newHome = gridPosition(for: index)
+                    updateDeskLighting(index: index, active: true, color: pod.accentColor)
                 }
             }
+            updatePostIt(for: name, state: state, color: pod.accentColor)
+
         case .debating:
-            // The homePosition circular coordinates are computed in startDebate()
-            break
+            if let index = idx {
+                updateDeskLighting(index: index, active: false)
+            }
+            updatePostIt(for: name, state: state, color: pod.accentColor)
         }
 
         pod.homePosition = newHome
@@ -977,6 +1034,117 @@ final class WarRoomScene: SKScene {
         container.addChild(label)
 
         return container
+    }
+
+    private func setupWhiteboard() {
+        let boardW: CGFloat = 180
+        let boardH: CGFloat = 70
+        let board = SKShapeNode(rectOf: CGSize(width: boardW, height: boardH), cornerRadius: 8)
+        board.name = "scrum_board"
+        board.fillColor = SKColor(white: 1, alpha: 0.02)
+        board.strokeColor = SKColor(white: 1, alpha: 0.08)
+        board.lineWidth = 1
+        board.position = CGPoint(x: 120, y: size.height - 90)
+        board.zPosition = -6
+        addChild(board)
+
+        // Columns and titles
+        let titles = ["TODO", "DOING", "DONE"]
+        let colW = boardW / 3
+        for i in 0..<3 {
+            let lbl = SKLabelNode(text: titles[i])
+            lbl.fontName = "SFProText-Semibold"
+            lbl.fontSize = 7
+            lbl.fontColor = SKColor.cyan.withAlphaComponent(0.4)
+            lbl.position = CGPoint(x: -boardW/2 + CGFloat(i)*colW + colW/2, y: boardH/2 - 14)
+            board.addChild(lbl)
+            
+            // Vertical dividers
+            if i > 0 {
+                let line = SKShapeNode()
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: -boardW/2 + CGFloat(i)*colW, y: -boardH/2 + 6))
+                path.addLine(to: CGPoint(x: -boardW/2 + CGFloat(i)*colW, y: boardH/2 - 6))
+                line.path = path
+                line.strokeColor = SKColor(white: 1, alpha: 0.05)
+                line.lineWidth = 1
+                board.addChild(line)
+            }
+        }
+    }
+
+    private func updatePostIt(for name: String, state: OfficeAgentState, color: SKColor) {
+        guard let board = childNode(withName: "scrum_board") else { return }
+        
+        let postItName = "postit_\(name.lowercased())"
+        board.childNode(withName: postItName)?.removeFromParent()
+        
+        let colIndex: Int
+        switch state {
+        case .waiting:
+            colIndex = 0 // TODO
+        case .working, .speaking:
+            colIndex = 1 // DOING
+        case .idle:
+            colIndex = 2 // DONE
+        case .debating:
+            return
+        }
+        
+        let boardW: CGFloat = 180
+        let colW = boardW / 3
+        let targetX = -boardW/2 + CGFloat(colIndex)*colW + colW/2
+        
+        let postIt = SKShapeNode(rectOf: CGSize(width: 24, height: 16), cornerRadius: 2)
+        postIt.name = postItName
+        postIt.fillColor = color.withAlphaComponent(0.75)
+        postIt.strokeColor = .white.withAlphaComponent(0.3)
+        postIt.lineWidth = 0.5
+        postIt.zPosition = 1
+        
+        let lbl = SKLabelNode(text: String(name.prefix(3)).uppercased())
+        lbl.fontName = "SFMono-Bold"
+        lbl.fontSize = 6.5
+        lbl.fontColor = .black
+        lbl.verticalAlignmentMode = .center
+        postIt.addChild(lbl)
+        
+        let targetY = CGFloat.random(in: -18...8)
+        postIt.position = CGPoint(x: targetX, y: targetY)
+        postIt.alpha = 0
+        board.addChild(postIt)
+        
+        if colIndex == 2 {
+            postIt.run(SKAction.sequence([
+                SKAction.fadeIn(withDuration: 0.3),
+                SKAction.wait(forDuration: 3.5),
+                SKAction.fadeOut(withDuration: 0.5),
+                SKAction.removeFromParent()
+            ]))
+        } else {
+            postIt.run(SKAction.fadeIn(withDuration: 0.3))
+        }
+    }
+
+    private func updateDeskLighting(index: Int, active: Bool, color: SKColor = .cyan) {
+        guard let desk = childNode(withName: "desk_\(index)") as? SKShapeNode else { return }
+        guard let screen = desk.childNode(withName: "screen") as? SKShapeNode else { return }
+        
+        screen.removeAction(forKey: "screen_pulse")
+        screen.alpha = 1.0
+        
+        if active {
+            screen.fillColor = color.withAlphaComponent(0.4)
+            screen.strokeColor = color
+            let pulse = SKAction.repeatForever(SKAction.sequence([
+                SKAction.fadeAlpha(to: 1.0, duration: 0.5),
+                SKAction.fadeAlpha(to: 0.5, duration: 0.5)
+            ]))
+            screen.run(pulse, withKey: "screen_pulse")
+        } else {
+            screen.fillColor = SKColor.cyan.withAlphaComponent(0.08)
+            screen.strokeColor = SKColor.cyan.withAlphaComponent(0.25)
+        }
     }
 }
 
