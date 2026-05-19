@@ -302,7 +302,7 @@ final class ChatViewModel {
                 if let toolCalls = finalToolCalls, !toolCalls.isEmpty {
                     await MainActor.run { self.streamingStatus = "Executing tools (\(toolCalls.count))" }
                     
-                    let readOnlyTools = ["list_dir", "read_file", "view_file", "search", "grep_search", "search_web", "semantic_search", "fetch_images", "run_git"]
+                    let readOnlyTools = ["read_file", "list_directory", "search_files", "web_search", "fetch_url", "fetch_images", "search_knowledge_base"]
                     var concurrentCalls: [Message.ToolCall] = []
                     var serialCalls: [Message.ToolCall] = []
                     

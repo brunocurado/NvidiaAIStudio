@@ -455,7 +455,7 @@ final class SwarmOrchestrator {
                 try? context.save()
                 
                 // Execute tools (concurrent read-only, serial write)
-                let readOnlyTools = ["list_dir", "read_file", "view_file", "search", "grep_search", "search_web"]
+                let readOnlyTools = ["read_file", "list_directory", "search_files", "web_search", "fetch_url", "fetch_images", "search_knowledge_base"]
                 var concurrentCalls: [Message.ToolCall] = []
                 var serialCalls: [Message.ToolCall] = []
                 

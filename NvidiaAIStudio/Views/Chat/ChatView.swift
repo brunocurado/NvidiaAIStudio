@@ -45,9 +45,9 @@ struct ChatView: View {
                             // LazyVStack: only renders on-screen messages.
                             // The old VStack caused O(N) Markdown re-parses per frame → 99% CPU.
                             LazyVStack(spacing: 16) {
-                                let messages = session.messages
-                                let startIdx = max(0, messages.count - visibleMessageCount)
-                                ForEach(messages[startIdx..<messages.count], id: \.id) { message in
+                                let displayMessages = session.messages.filter { $0.role == .user || $0.role == .assistant }
+                                let startIdx = max(0, displayMessages.count - visibleMessageCount)
+                                ForEach(displayMessages[startIdx..<displayMessages.count], id: \.id) { message in
                                     MessageBubbleView(message: message)
                                         .equatable()
                                 }
@@ -67,24 +67,24 @@ struct ChatView: View {
                     }
                     .onChange(of: session.messages.count) {
                         // Always scroll on new messages (user sent or assistant replied)
-                        scrollToBottom(proxy)
+                        scrollToBottom(proxy, animated: !viewModel.isStreaming)
                     }
                     .onChange(of: viewModel.isStreaming) {
                         if viewModel.isStreaming {
-                            scrollToBottom(proxy)
+                            scrollToBottom(proxy, animated: false)
                         }
                     }
                     .onChange(of: viewModel.scrollTick) {
                         guard isUserNearBottom else { return }
-                        scrollToBottom(proxy)
+                        scrollToBottom(proxy, animated: false)
                     }
                     .onAppear {
-                        scrollToBottom(proxy)
+                        scrollToBottom(proxy, animated: true)
                     }
                     .onChange(of: session.id) {
                         visibleMessageCount = 20  // Reset on thread switch
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            scrollToBottom(proxy)
+                            scrollToBottom(proxy, animated: true)
                         }
                     }
                 }
@@ -171,9 +171,13 @@ struct ChatView: View {
         }
     }
     
-    /// Smooth scroll to bottom — avoids abrupt jumps.
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.15)) {
+    /// Scroll to bottom — uses instant scroll during active streaming to prevent layout glitches.
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.15)) {
+                proxy.scrollTo("bottom-anchor", anchor: .bottom)
+            }
+        } else {
             proxy.scrollTo("bottom-anchor", anchor: .bottom)
         }
     }

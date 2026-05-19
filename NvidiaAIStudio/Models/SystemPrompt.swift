@@ -29,7 +29,7 @@ enum SystemPrompt {
     ### Code & System
     - `run_command` — run any shell command (build, test, install, git, etc.)
     - `git` — git operations (status, diff, commit, push, log)
-    - `image_generation` — generate images via NVIDIA NIM
+    - `generate_image` — generate images via NVIDIA NIM
     - `ssh_command` — run commands on a remote server via SSH
 
     ## How to Use Tools
