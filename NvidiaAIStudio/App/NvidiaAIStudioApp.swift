@@ -90,8 +90,8 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
     static func apply(to window: NSWindow?) {
         guard let w = window else { return }
         w.makeKeyAndOrderFront(nil)
-        w.isOpaque = false
-        w.backgroundColor = .clear
+        w.isOpaque = true
+        w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
@@ -159,8 +159,8 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
     }
 
     private static func styleWindow(_ w: NSWindow) {
-        w.isOpaque = false
-        w.backgroundColor = .clear
+        w.isOpaque = true
+        w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
