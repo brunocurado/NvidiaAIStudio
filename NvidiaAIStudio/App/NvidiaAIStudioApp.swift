@@ -90,8 +90,8 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
     static func apply(to window: NSWindow?) {
         guard let w = window else { return }
         w.makeKeyAndOrderFront(nil)
-        w.isOpaque = true
-        w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
+        w.isOpaque = false
+        w.backgroundColor = .clear
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
@@ -159,35 +159,12 @@ final class AppWindowStyler: NSObject, NSWindowDelegate {
     }
 
     private static func styleWindow(_ w: NSWindow) {
-        w.isOpaque = true
-        w.backgroundColor = NSColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
+        w.isOpaque = false
+        w.backgroundColor = .clear
         w.titlebarAppearsTransparent = true
         w.titleVisibility = .hidden
         w.styleMask.insert(.fullSizeContentView)
         w.toolbarStyle = .unified
-
-        // Aggressively clear all titlebar container backgrounds
-        func clearBackground(_ view: NSView) {
-            view.wantsLayer = true
-            view.layer?.backgroundColor = CGColor.clear
-            view.layer?.borderWidth = 0
-            // Also clear any visual effect views in the titlebar
-            if let effectView = view as? NSVisualEffectView {
-                effectView.state = .inactive
-                effectView.material = .underWindowBackground
-                effectView.alphaValue = 0
-            }
-            for sub in view.subviews { clearBackground(sub) }
-        }
-
-        if let titlebarContainer = w.standardWindowButton(.closeButton)?.superview?.superview {
-            clearBackground(titlebarContainer)
-        }
-        if let frameView = w.contentView?.superview {
-            // Only clear the frame layers, not the actual content
-            frameView.wantsLayer = true
-            frameView.layer?.backgroundColor = CGColor.clear
-        }
     }
 
     func windowWillEnterFullScreen(_ notification: Notification) {

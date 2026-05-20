@@ -72,7 +72,7 @@ struct WarRoomSpriteView: View {
                 }
             }
         }
-        .background(Color(red: 0.04, green: 0.05, blue: 0.08))
+        .background(Color.clear)
     }
 
     // MARK: - Empty State

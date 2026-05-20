@@ -374,7 +374,7 @@ final class WarRoomScene: SKScene {
     // MARK: - Setup ────────────────────────────────────────────────────
 
     override func didMove(to view: SKView) {
-        backgroundColor = SKColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
+        backgroundColor = .clear
         setupBackground()
 
         self.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(origin: .zero, size: self.size))
