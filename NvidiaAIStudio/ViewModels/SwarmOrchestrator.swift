@@ -730,8 +730,9 @@ final class SwarmOrchestrator {
             }
 
             guard let decodedTasks = decodedTasks else {
+                let errorMessage = lastError
                 await MainActor.run {
-                    appState.showToast("COO: Failed after 3 attempts. \(lastError)", level: .error)
+                    appState.showToast("COO: Failed after 3 attempts. \(errorMessage)", level: .error)
                 }
                 return
             }
