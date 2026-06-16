@@ -135,22 +135,27 @@ struct Message: Identifiable, Codable, Equatable {
         let processedContent = contentIncludingTextAttachments()
         var dict: [String: Any] = ["role": role.rawValue, "content": processedContent]
         let imageAttachments = attachments.filter { $0.mimeType.starts(with: "image/") }
-        
-        // Multimodal content: supported for user and tool roles
-        if !imageAttachments.isEmpty && (role == .user || role == .tool) {
+
+        // Multimodal content: supported for user messages only.
+        // Tool messages must be plain text — the OpenAI/NVIDIA API rejects
+        // multimodal content in tool messages with a 400 error
+        // ("ChatCompletionRequestToolMessageContent" enum mismatch).
+        // Attachments are still stored on the message for UI rendering,
+        // but they are NOT sent to the API.
+        if !imageAttachments.isEmpty && role == .user {
             var contentParts: [[String: Any]] = []
-            
+
             if !processedContent.isEmpty {
                 contentParts.append(["type": "text", "text": processedContent])
             }
-            
+
             for att in imageAttachments {
                 contentParts.append([
                     "type": "image_url",
                     "image_url": ["url": "data:\(att.mimeType);base64,\(att.data)"]
                 ])
             }
-            
+
             dict["content"] = contentParts
         }
         
