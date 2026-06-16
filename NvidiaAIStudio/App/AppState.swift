@@ -325,9 +325,38 @@ final class AppState {
         Task { await sessionStore.delete(id: id) }
     }
     
+    // Debounce mechanism for saveActiveSession to prevent SwiftData merge conflicts
+    // during rapid streaming updates. Saves are coalesced within a 500ms window.
+    private var pendingSaveTask: Task<Void, Never>?
+    private var lastSaveTime: Date = .distantPast
+    private let saveDebounceInterval: TimeInterval = 0.5
+
     func saveActiveSession() {
         guard let session = activeSession else { return }
-        Task { await sessionStore.save(session) }
+
+        // Cancel any pending save — we'll schedule a new one
+        pendingSaveTask?.cancel()
+
+        pendingSaveTask = Task { [weak self] in
+            guard let self else { return }
+
+            // Wait for the debounce interval to coalesce rapid saves
+            try? await Task.sleep(for: .seconds(self.saveDebounceInterval))
+
+            // Check if cancelled during sleep
+            if Task.isCancelled { return }
+
+            // Throttle: don't save more than once per interval
+            let now = Date()
+            if now.timeIntervalSince(self.lastSaveTime) < self.saveDebounceInterval {
+                // Still too soon — reschedule
+                self.saveActiveSession()
+                return
+            }
+
+            self.lastSaveTime = now
+            await self.sessionStore.save(session)
+        }
     }
     
     func loadSessions() {

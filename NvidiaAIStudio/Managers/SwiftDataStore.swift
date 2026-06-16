@@ -23,7 +23,7 @@ actor SwiftDataStore {
     func save(_ session: Session) {
         let sessionID = session.id
         let fetchDescriptor = FetchDescriptor<SDSession>(predicate: #Predicate { $0.id == sessionID })
-        
+
         let sdSession: SDSession
         if let existing = try? modelContext.fetch(fetchDescriptor).first {
             sdSession = existing
@@ -31,17 +31,25 @@ actor SwiftDataStore {
             sdSession = SDSession(title: session.title, modelID: session.modelID, createdAt: session.createdAt, updatedAt: session.updatedAt)
             modelContext.insert(sdSession)
         }
-        
+
         // Update properties
         sdSession.title = session.title
         sdSession.modelID = session.modelID
         sdSession.updatedAt = session.updatedAt
         sdSession.projectPath = session.projectPath
-        
+
         reconcileMessages(on: sdSession, with: session.messages)
         reconcileBackgroundAgents(on: sdSession, with: session.backgroundAgents)
-        
-        try? modelContext.save()
+
+        // Save with proper error handling to prevent crashes from merge conflicts
+        do {
+            try modelContext.save()
+        } catch {
+            // Log the error but don't crash — the session is still in memory
+            print("⚠️ SwiftDataStore.save failed for session \(sessionID): \(error.localizedDescription)")
+            // Rollback the context to a clean state for the next save attempt
+            modelContext.rollback()
+        }
     }
     
     /// Delete a session from disk by ID.

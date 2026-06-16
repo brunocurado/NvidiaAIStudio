@@ -183,12 +183,28 @@ struct MessageBubbleView: View, Equatable {
                     if attachment.mimeType.starts(with: "image/") {
                         if let imageData = Data(base64Encoded: attachment.data),
                            let nsImage = NSImage(data: imageData) {
-                            Image(nsImage: nsImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: 300, maxHeight: 200)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(maxWidth: 300, maxHeight: 200)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+
+                                // Save button — uses NSSavePanel so the user picks the location
+                                Button {
+                                    ImageSaver.save(imageData: imageData, suggestedFilename: attachment.filename)
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "square.and.arrow.down")
+                                            .font(.caption)
+                                        Text("Save Image")
+                                            .font(.caption)
+                                    }
+                                    .foregroundStyle(.blue)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     } else {
                         HStack(spacing: 6) {
