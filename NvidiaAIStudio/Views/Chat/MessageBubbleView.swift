@@ -49,7 +49,7 @@ struct MessageBubbleView: View, Equatable {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             if message.role == .user {
-                Spacer(minLength: 80)
+                Spacer(minLength: 40)
             } else {
                 // Assistant avatar — subtle green glow
                 ZStack {
@@ -62,7 +62,7 @@ struct MessageBubbleView: View, Equatable {
                 }
                 .padding(.top, 4)
             }
-            
+
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
                 // Reasoning/thinking (collapsible) — show during streaming even while content is empty
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
@@ -79,7 +79,7 @@ struct MessageBubbleView: View, Equatable {
 
                 if showBubble {
                     let theme = _resolveTheme(themeID)
-                    
+
                     if message.role == .assistant {
                         // Assistant bubble — clear glass content board
                         ZStack(alignment: .leading) {
@@ -87,11 +87,12 @@ struct MessageBubbleView: View, Equatable {
                             let safeContent = message.content.count > 15000
                                 ? String(message.content.prefix(15000)) + "\n\n*[Content truncated for display]*"
                                 : message.content
-                            
+
                             Markdown(safeContent)
                                 .markdownTheme(.nvidia)
                                 .textSelection(.enabled)
-                            
+                                .fixedSize(horizontal: false, vertical: true)
+
                             // Streaming dots
                             StreamingDotsView()
                                 .opacity(hasContent ? 0.0 : 0.9)
@@ -100,6 +101,7 @@ struct MessageBubbleView: View, Equatable {
                         .textSelection(.enabled)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .macContentBoard(cornerRadius: 18)
                         .foregroundStyle(Color.primary)
                         .contextMenu {
@@ -120,8 +122,10 @@ struct MessageBubbleView: View, Equatable {
                         Text(message.content)
                             .font(.body)
                             .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                             .glassEffect(
                                 .clear.tint(theme.accentColor.opacity(0.22)).interactive(),
                                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
