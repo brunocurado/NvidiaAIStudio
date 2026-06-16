@@ -6,7 +6,6 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var showExportPanel = false
     @State private var showNewAgentSheet = false
-    @State private var visibleMessageCount = 100
     @State private var isUserNearBottom = true
 
     var body: some View {
@@ -15,47 +14,18 @@ struct ChatView: View {
                 // Messages
                 ScrollViewReader { proxy in
                     ScrollView {
-                        VStack(spacing: 0) {
-                            // "Load earlier messages" button
-                            let totalMessages = session.messages.filter { $0.role == .user || $0.role == .assistant }.count
+                        VStack(spacing: 16) {
+                            // Messages — use regular VStack instead of LazyVStack
+                            // to ensure all messages are always rendered.
+                            // LazyVStack was causing messages to disappear during
+                            // thinking/tool-calling mode.
+                            let displayMessages = session.messages.filter { $0.role == .user || $0.role == .assistant }
 
-                            if totalMessages > visibleMessageCount {
-                                Button {
-                                    withAnimation(.spring(duration: 0.3)) {
-                                        visibleMessageCount += 50
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "arrow.up.circle")
-                                            .font(.caption)
-                                        Text("Load \(min(50, totalMessages - visibleMessageCount)) earlier messages")
-                                            .font(.caption)
-                                            .fontWeight(.medium)
-                                    }
-                                    .foregroundStyle(.secondary)
-                                    .padding(.vertical, 8)
-                                    .padding(.horizontal, 16)
-                                    .background(GlassTheme.flatFill, in: Capsule())
-                                }
-                                .buttonStyle(.plain)
-                                .frame(maxWidth: .infinity)
-                                .padding(.bottom, 8)
+                            ForEach(displayMessages, id: \.id) { message in
+                                MessageBubbleView(message: message)
                             }
 
-                            // LazyVStack: only renders on-screen messages.
-                            // The old VStack caused O(N) Markdown re-parses per frame → 99% CPU.
-                            LazyVStack(spacing: 16) {
-                                let displayMessages = session.messages.filter { $0.role == .user || $0.role == .assistant }
-                                let startIdx = max(0, displayMessages.count - visibleMessageCount)
-                                ForEach(displayMessages[startIdx..<displayMessages.count], id: \.id) { message in
-                                    MessageBubbleView(message: message)
-                                        .equatable()
-                                }
-                            }
-                            .animation(.none, value: session.messages.count)
-
-                            // Bottom anchor — OUTSIDE LazyVStack so always rendered
-                            // Also serves as a visibility sentinel: when on-screen, user is "near bottom"
+                            // Bottom anchor — always at the end
                             Color.clear
                                 .frame(height: 1)
                                 .id("bottom-anchor")
@@ -82,7 +52,6 @@ struct ChatView: View {
                         scrollToBottom(proxy, animated: true)
                     }
                     .onChange(of: session.id) {
-                        visibleMessageCount = 100  // Reset on thread switch
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             scrollToBottom(proxy, animated: true)
                         }
