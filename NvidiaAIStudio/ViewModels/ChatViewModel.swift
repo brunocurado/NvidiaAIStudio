@@ -772,12 +772,41 @@ final class ChatViewModel {
         }
         
         let (textContent, imageAttachments) = self.extractVisionPayload(from: rawResult, supportsVision: supportsVision)
-        
+
+        // Special handling for generate_image: extract the base64 image and create an attachment
+        var finalAttachments = imageAttachments
+        var finalTextContent = textContent
+
+        if toolCall.name == "generate_image",
+           let parsed = ImageGenerationResult.parse(rawResult) {
+            // Parse the data URL: data:image/png;base64,<data>
+            let dataURL = parsed.dataURL
+            if let commaIndex = dataURL.firstIndex(of: ",") {
+                let mimeType = String(dataURL[dataURL.startIndex..<commaIndex]
+                    .replacingOccurrences(of: "data:", with: ""))
+                let base64Data = String(dataURL[dataURL.index(after: commaIndex)...])
+
+                let attachment = Message.Attachment(
+                    filename: "generated_image_\(UUID().uuidString.prefix(8)).png",
+                    mimeType: mimeType,
+                    data: base64Data
+                )
+                finalAttachments.append(attachment)
+                // Use a clean confirmation message — prevents the model from hallucinating
+                // that it "described" the image instead of showing it
+                finalTextContent = parsed.cleanText
+            }
+        }
+
+        // Capture values before crossing actor boundary
+        let attachments = finalAttachments
+        let text = finalTextContent
+
         await MainActor.run {
             let toolResultMessage = Message(
                 role: .tool,
-                content: textContent,
-                attachments: imageAttachments,
+                content: text,
+                attachments: attachments,
                 toolCallId: toolCall.id
             )
             appState.mutateActiveSession { $0.messages.append(toolResultMessage) }
