@@ -398,6 +398,26 @@ final class ChatViewModel {
                 let doneContent = accContent
                 let doneToolCalls = accToolCalls
                 let doneUsage = accUsage
+
+                // Detect "fake" image generation — model describes an image in text
+                // without actually calling the generate_image tool. This happens when
+                // the model hallucinates or doesn't support tool calling properly.
+                let looksLikeFakeImage = doneToolCalls == nil && (
+                    doneContent.contains("data:image/png;base64,PLACEHOLDER") ||
+                    doneContent.contains("data:image/png;base64,<") ||
+                    (doneContent.contains("<img") && doneContent.contains("base64"))
+                )
+
+                if looksLikeFakeImage {
+                    let errorMsg = "⚠️ The model described an image but didn't actually generate one. This usually means the selected model doesn't support the `generate_image` tool. Try switching to a model that supports tool calling (e.g., Claude, GPT-4o, or a NVIDIA model with tool support)."
+                    await MainActor.run {
+                        self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: errorMsg, isStreaming: false), in: appState)
+                        self.isStreaming = false
+                        appState.showToast("Model didn't generate image", level: .error)
+                    }
+                    return
+                }
+
                 await MainActor.run {
                     self.isStreaming = false
                     self.updateContextUsage(appState)
@@ -428,7 +448,7 @@ final class ChatViewModel {
                         .components(separatedBy: "—").first?.trimmingCharacters(in: .whitespaces) ?? model.name
                     AppNotifications.sendResponseCompleted(modelName: cleanName)
                 }
-                
+
                 return
             } catch let error as CancellationError {
                 _ = error
