@@ -402,18 +402,46 @@ final class ChatViewModel {
                 // Detect "fake" image generation — model describes an image in text
                 // without actually calling the generate_image tool. This happens when
                 // the model hallucinates or doesn't support tool calling properly.
+                //
+                // Two cases to detect:
+                // 1. Model output contains image-like placeholders (e.g., "data:image/png;base64,PLACEHOLDER")
+                // 2. User asked for an image but no tool was called at all
+                let userAskedForImage = await MainActor.run {
+                    guard let lastUserMsg = appState.activeSession?.messages.last(where: { $0.role == .user }) else {
+                        return false
+                    }
+                    let lower = lastUserMsg.content.lowercased()
+                    let imageKeywords = ["generate image", "create image", "make image", "draw", "criar imagem", "gerar imagem", "fazer imagem", "desenhar", "logo", "ilustração", "illustration", "picture", "imagem de", "image of"]
+                    return imageKeywords.contains(where: { lower.contains($0) })
+                }
+
                 let looksLikeFakeImage = doneToolCalls == nil && (
                     doneContent.contains("data:image/png;base64,PLACEHOLDER") ||
                     doneContent.contains("data:image/png;base64,<") ||
-                    (doneContent.contains("<img") && doneContent.contains("base64"))
+                    (doneContent.contains("<img") && doneContent.contains("base64")) ||
+                    (userAskedForImage && doneContent.lowercased().contains("here"))
                 )
 
                 if looksLikeFakeImage {
-                    let errorMsg = "⚠️ The model described an image but didn't actually generate one. This usually means the selected model doesn't support the `generate_image` tool. Try switching to a model that supports tool calling (e.g., Claude, GPT-4o, or a NVIDIA model with tool support)."
+                    let errorMsg = """
+                    ⚠️ The model didn't actually generate an image — it just described one in text.
+
+                    **What should happen:**
+                    1. The selected model (\(model.name)) should call the `generate_image` tool with a detailed prompt
+                    2. The tool then calls the image model (Flux.1-Dev, etc.) configured in Settings → Image Model
+                    3. The generated image is returned and displayed
+
+                    **Why this failed:**
+                    The selected model (\(model.name)) doesn't support tool calling properly, so it hallucinated an image description instead of calling the tool.
+
+                    **Try:**
+                    - Switch to a model with strong tool support: Claude (Sonnet/Opus), GPT-4o, or NVIDIA models like `qwen/qwen3-coder-480b-a35b-instruct`
+                    - Or use the Prompt Lab to generate the prompt, then call the image tool manually
+                    """
                     await MainActor.run {
                         self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: errorMsg, isStreaming: false), in: appState)
                         self.isStreaming = false
-                        appState.showToast("Model didn't generate image", level: .error)
+                        appState.showToast("Model didn't call generate_image tool", level: .error)
                     }
                     return
                 }

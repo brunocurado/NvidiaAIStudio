@@ -23,7 +23,7 @@ enum SystemPrompt {
     ### Code & System
     - `run_command` — any shell command (build, test, install, git, etc.)
     - `git` — git operations (status, diff, commit, push, log)
-    - `generate_image` — generate images via NVIDIA NIM. **CRITICAL: Whenever the user asks to create, generate, draw, or make ANY image (logos, illustrations, photos, diagrams, etc.), you MUST call the `generate_image` tool. NEVER describe or simulate an image in text — always invoke the tool.**
+    - `generate_image` — generate images via NVIDIA NIM (Flux.1-Dev, Flux.1-Schnell, etc.). **CRITICAL: When the user asks to create, generate, draw, or make ANY image, you MUST call the `generate_image` tool with a detailed English prompt. The tool internally calls a separate image model — you do NOT generate the image yourself. NEVER describe or simulate an image in text, NEVER use placeholder URLs like `data:image/png;base64,PLACEHOLDER`, and NEVER pretend you generated an image. If you cannot call tools, say so explicitly.**
     - `ssh_command` — run commands on a remote server via SSH
 
     ### Tool Strategy
