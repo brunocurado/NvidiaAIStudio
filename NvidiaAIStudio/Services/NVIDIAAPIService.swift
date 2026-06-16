@@ -63,8 +63,15 @@ final class NVIDIAAPIService: AIProvider {
     private let baseURL: String
     private let session: URLSession
     
+    private static let sharedSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 3600
+        config.timeoutIntervalForResource = 7200
+        return URLSession(configuration: config)
+    }()
+    
     // Thinking keyword detection (matches Python chat_worker.py)
-    private let thinkingKeywords = ["deepseek", "kimi", "qwq"]
+    private let thinkingKeywords = ["deepseek", "kimi", "qwq", "minimax-m3", "minimax-m4"]
     private let thinkingQwenSuffix = "thinking"
     
     // Models that use reasoning_effort instead of reasoning.type
@@ -73,11 +80,7 @@ final class NVIDIAAPIService: AIProvider {
     init(apiKey: String, baseURL: String = "https://integrate.api.nvidia.com/v1") {
         self.apiKey = apiKey
         self.baseURL = baseURL
-        
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 3600  // 60 min — supports any model including large thinking models
-        config.timeoutIntervalForResource = 7200  // 2h max for the full resource transfer
-        self.session = URLSession(configuration: config)
+        self.session = Self.sharedSession
     }
     
     /// Whether a model needs reasoning/thinking parameters.
@@ -105,29 +108,33 @@ final class NVIDIAAPIService: AIProvider {
     ) -> AsyncThrowingStream<ChatChunk, Error> {
         AsyncThrowingStream { continuation in
             Task {
+                AppLog.network.info("Chat request: model=\(model.id, privacy: .public), messages=\(messages.count), tools=\(tools?.count ?? 0)")
                 do {
                     let request = try buildRequest(messages: messages, model: model, tools: tools, reasoningLevel: reasoningLevel)
-                    
+
                     let maxRetries = 5
                     var lastError: Error?
-                    
+
                     for attempt in 0..<maxRetries {
                         do {
                             try await streamResponse(request: request, continuation: continuation)
+                            AppLog.network.info("Chat completed: model=\(model.id, privacy: .public)")
                             return // Success
                         } catch let error as APIServiceError {
                             lastError = error
                             if case .rateLimited = error {
                                 let delay = pow(2.0, Double(attempt))
+                                AppLog.network.warning("Rate limited, retry \(attempt + 1)/\(maxRetries) after \(delay)s")
                                 try await Task.sleep(for: .seconds(delay))
                                 continue
                             }
+                            AppLog.network.error("Chat failed: \(error.localizedDescription, privacy: .public)")
                             throw error
                         }
                     }
-                    
+
                     throw lastError ?? APIServiceError.invalidResponse
-                    
+
                 } catch {
                     continuation.finish(throwing: error)
                 }
@@ -172,16 +179,18 @@ final class NVIDIAAPIService: AIProvider {
         var body: [String: Any] = [
             "model": model.id,
             "stream": true,
-            "max_tokens": 16384
+            "max_tokens": maxOutputTokens(reasoningLevel: reasoningLevel, model: model)
         ]
         
         // Convert messages to API format
         let apiMessages = messages.map { $0.toAPIDict() }
         body["messages"] = apiMessages
         
-        // Add tools if provided (Mistral and DeepSeek V4-Pro support tools + reasoning simultaneously)
-        let supportsToolsAndReasoning = usesReasoningEffort(modelID: model.id) || model.id.contains("v4-pro")
-        if let tools, !tools.isEmpty, reasoningLevel == .off || !supportsThinking(modelID: model.id) || supportsToolsAndReasoning {
+        // Add tools if provided
+        // Most modern models support tools + reasoning simultaneously.
+        // We always send tools, letting the API handle any incompatibility.
+        // Only strip tools for models explicitly known to fail with both.
+        if let tools, !tools.isEmpty {
             body["tools"] = tools
             body["tool_choice"] = "auto"
         }
@@ -194,7 +203,12 @@ final class NVIDIAAPIService: AIProvider {
             case .low, .off: break // Mistral: omit param entirely for no reasoning
             }
         } else if supportsThinking(modelID: model.id) && reasoningLevel != .off {
-            if model.id.contains("v4-pro") {
+            let lower = model.id.lowercased()
+            if lower.contains("minimax-m3") || lower.contains("minimax-m4") {
+                // MiniMax M3/M4: uses chat_template_kwargs with thinking_mode "enabled"/"disabled"
+                let mode = reasoningLevel != .off ? "enabled" : "disabled"
+                body["chat_template_kwargs"] = ["thinking_mode": mode]
+            } else if model.id.contains("v4-pro") {
                 // DeepSeek V4 reasoning uses chat_template_kwargs based on API docs
                 let thinkingValue: Any
                 switch reasoningLevel {
@@ -208,9 +222,9 @@ final class NVIDIAAPIService: AIProvider {
                 // Qwen/DeepSeek-style: uses reasoning object with budget
                 let budget: Int
                 switch reasoningLevel {
-                case .high: budget = 10000
-                case .medium: budget = 5000
-                case .low: budget = 1024
+                case .high: budget = 4096
+                case .medium: budget = 2048
+                case .low: budget = 512
                 case .off: budget = 0
                 }
                 body["reasoning"] = ["type": "enabled", "max_tokens": budget]
@@ -219,6 +233,32 @@ final class NVIDIAAPIService: AIProvider {
         
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
+    }
+    
+    private func maxOutputTokens(reasoningLevel: ReasoningLevel, model: AIModel? = nil) -> Int {
+        let contextWindow = model?.contextWindow ?? 128_000
+        
+        if contextWindow >= 1_000_000 {
+            // 1M+ context models (MiniMax M3, DeepSeek V4, GPT-4.1): allow larger outputs
+            switch reasoningLevel {
+            case .high: return 16_384
+            case .medium: return 12_288
+            case .low, .off: return 8_192
+            }
+        } else if contextWindow <= 32_768 {
+            // Small context models: conservative output
+            switch reasoningLevel {
+            case .high: return 4_096
+            case .medium, .low, .off: return 2_048
+            }
+        } else {
+            // Standard 128K-262K models
+            switch reasoningLevel {
+            case .high: return 8_192
+            case .medium: return 6_144
+            case .low, .off: return 4_096
+            }
+        }
     }
     
     private func streamResponse(request: URLRequest, continuation: AsyncThrowingStream<ChatChunk, Error>.Continuation) async throws {
@@ -258,19 +298,9 @@ final class NVIDIAAPIService: AIProvider {
             let jsonString = String(trimmed.dropFirst(6))
             
             if jsonString == "[DONE]" {
-                print("🏁 Stream finished [DONE]")
                 continuation.finish()
                 return
             }
-            
-            // -- DEBUG LOGGING --
-            if jsonString.contains("tool_calls") {
-                print("🛠️ [API DEBUG] Recebeu tool_calls oficial: \(jsonString)")
-            }
-            if jsonString.contains("<tool_call") {
-                print("⚠️ [API DEBUG] Recebeu XML <tool_call> no meio do texto: \(jsonString)")
-            }
-            // -------------------
             
             guard let jsonData = jsonString.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],

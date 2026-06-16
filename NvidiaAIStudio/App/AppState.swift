@@ -37,18 +37,23 @@ final class AppState {
         do {
             container = try makeContainer()
         } catch {
-            // Schema migrated — wipe the store and recreate cleanly.
-            // Agents are re-seeded by seedDefaultAgents(). Chat sessions live in JSON, not SwiftData.
-            print("⚠️ SwiftData schema changed — wiping store and recreating: \(error)")
+            // Schema changes can make SwiftData refuse to open the store. Keep a
+            // backup before recreating so chat and swarm data is not silently lost.
+            print("⚠️ SwiftData store failed to open — backing up and recreating: \(error)")
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport
             let storeFiles = (try? FileManager.default.contentsOfDirectory(at: storeDir, includingPropertiesForKeys: nil)) ?? []
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let backupDir = appSupport.appendingPathComponent("NvidiaAIStudio-store-backup-\(stamp)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: backupDir, withIntermediateDirectories: true)
             for file in storeFiles where file.lastPathComponent.hasPrefix("default") || file.lastPathComponent.hasPrefix("NvidiaAIStudio") {
+                let destination = backupDir.appendingPathComponent(file.lastPathComponent)
+                try? FileManager.default.copyItem(at: file, to: destination)
                 try? FileManager.default.removeItem(at: file)
             }
             do {
                 container = try makeContainer()
-                print("✅ SwiftData store recreated successfully after schema migration.")
+                print("✅ SwiftData store recreated. Backup kept at \(backupDir.path)")
             } catch {
                 fatalError("Failed to initialize SwiftData container even after wiping store: \(error)")
             }
@@ -238,7 +243,7 @@ final class AppState {
     var isRightPanelVisible = false
     var rightPanelMode: RightPanelMode = .diff
     var activeCanvasURL: URL? = nil
-    var reasoningLevel: ReasoningLevel = .medium
+    var reasoningLevel: ReasoningLevel = .low
     var fileAccessLevel: FileAccessLevel = .fullAccess
     var currentBranch: String = "main"
     var availableBranches: [String] = []
@@ -246,10 +251,10 @@ final class AppState {
     func refreshGitBranch() {
         let path = activeWorkspacePath
         Task {
-            let result = await ShellHelper.run("cd '\(path)' && git branch --show-current 2>/dev/null")
+            let result = await ShellHelper.runExecutable("git", arguments: ["branch", "--show-current"], workingDirectory: path)
             let branch = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             
-            let branchesResult = await ShellHelper.run("cd '\(path)' && git branch 2>/dev/null")
+            let branchesResult = await ShellHelper.runExecutable("git", arguments: ["branch"], workingDirectory: path)
             let branches = branchesResult.output
                 .components(separatedBy: "\n")
                 .map { $0.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "* ", with: "") }
@@ -265,7 +270,7 @@ final class AppState {
     func checkoutBranch(_ branch: String) {
         let path = activeWorkspacePath
         Task {
-            let result = await ShellHelper.run("cd '\(path)' && git checkout '\(branch)' 2>&1")
+            let result = await ShellHelper.runExecutable("git", arguments: ["checkout", branch], workingDirectory: path)
             await MainActor.run {
                 if result.exitCode == 0 {
                     self.currentBranch = branch
@@ -408,13 +413,22 @@ final class AppState {
     func saveModelPreferences() {
         let prefs = Dictionary(availableModels.map { ($0.id, $0.isEnabled) }, uniquingKeysWith: { _, last in last })
         UserDefaults.standard.set(prefs, forKey: "modelPreferences")
+        
+        let customContexts = Dictionary(availableModels.map { ($0.id, $0.contextWindow) }, uniquingKeysWith: { _, last in last })
+        UserDefaults.standard.set(customContexts, forKey: "customModelContextWindows")
     }
     
     func loadModelPreferences() {
-        guard let prefs = UserDefaults.standard.dictionary(forKey: "modelPreferences") as? [String: Bool] else { return }
+        let prefs = UserDefaults.standard.dictionary(forKey: "modelPreferences") as? [String: Bool]
+        let customContexts = UserDefaults.standard.dictionary(forKey: "customModelContextWindows") as? [String: Int]
+        
         for i in availableModels.indices {
-            if let saved = prefs[availableModels[i].id] {
+            let modelId = availableModels[i].id
+            if let saved = prefs?[modelId] {
                 availableModels[i].isEnabled = saved
+            }
+            if let customContext = customContexts?[modelId] {
+                availableModels[i].contextWindow = customContext
             }
         }
     }

@@ -9,6 +9,8 @@ private let _resolveTheme: (String) -> AppTheme = { AppTheme.find(id: $0) }
 struct MessageBubbleView: View, Equatable {
     let message: Message
     @State private var showToolDetail = false
+    @State private var isHovering = false
+    @State private var showCopied = false
     @AppStorage("appThemeID") private var themeID = "liquid_glass_dark"
     
     static func == (lhs: MessageBubbleView, rhs: MessageBubbleView) -> Bool {
@@ -18,6 +20,30 @@ struct MessageBubbleView: View, Equatable {
         lhs.message.reasoning == rhs.message.reasoning &&
         lhs.message.toolCalls?.count == rhs.message.toolCalls?.count &&
         lhs.message.statusBadges.count == rhs.message.statusBadges.count
+    }
+    
+    private func copyMessage() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(message.content, forType: .string)
+        withAnimation(.easeInOut(duration: 0.2)) { showCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation(.easeInOut(duration: 0.2)) { showCopied = false }
+        }
+    }
+    
+    @ViewBuilder
+    private func copyButton() -> some View {
+        Button(action: copyMessage) {
+            Image(systemName: showCopied ? "checkmark" : "doc.on.doc")
+                .font(.system(size: 11))
+                .foregroundStyle(showCopied ? .green : .secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(showCopied ? "Copiado!" : "Copiar mensagem")
+        .opacity(isHovering || showCopied ? 1.0 : 0.0)
+        .animation(.easeInOut(duration: 0.15), value: isHovering)
     }
     
     var body: some View {
@@ -78,10 +104,15 @@ struct MessageBubbleView: View, Equatable {
                         .foregroundStyle(Color.primary)
                         .contextMenu {
                             Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(message.content, forType: .string)
+                                copyMessage()
                             } label: {
                                 Label("Copy Message", systemImage: "doc.on.doc")
+                            }
+                        }
+                        .overlay(alignment: .topTrailing) {
+                            if !message.isStreaming && !message.content.isEmpty {
+                                copyButton()
+                                    .padding(6)
                             }
                         }
                     } else {
@@ -98,10 +129,15 @@ struct MessageBubbleView: View, Equatable {
                             .foregroundStyle(GlassTheme.textPrimary)
                             .contextMenu {
                                 Button {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(message.content, forType: .string)
+                                    copyMessage()
                                 } label: {
                                     Label("Copy Message", systemImage: "doc.on.doc")
+                                }
+                            }
+                            .overlay(alignment: .topTrailing) {
+                                if !message.content.isEmpty {
+                                    copyButton()
+                                        .padding(6)
                                 }
                             }
                     }
@@ -200,6 +236,7 @@ struct MessageBubbleView: View, Equatable {
             }
         }
         .padding(.horizontal, 24)
+        .onHover { hovering in isHovering = hovering }
     }
 }
 

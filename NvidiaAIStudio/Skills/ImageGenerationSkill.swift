@@ -4,7 +4,11 @@ import Foundation
 /// The AI model calls this when the user requests image generation.
 struct ImageGenerationSkill: Skill {
     let name = "generate_image"
-    let description = "Generate an image from a text prompt using NVIDIA FLUX. Returns the image as a base64 string."
+    var description: String {
+        let selectedModelID = UserDefaults.standard.string(forKey: "selectedImageModelID") ?? "flux.2-klein-4b"
+        let modelName = ImageModel.availableImageModels.first(where: { $0.id == selectedModelID })?.name ?? "NVIDIA FLUX"
+        return "Generate an image from a text prompt using \(modelName). Returns the image as a base64 string."
+    }
     
     var parameters: [String: Any] {
         [
@@ -33,8 +37,10 @@ struct ImageGenerationSkill: Skill {
         let width = SkillArgs.getInt(args, key: "width", defaultValue: 1024)
         let height = SkillArgs.getInt(args, key: "height", defaultValue: 1024)
         
-        guard let url = URL(string: "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.2-klein-4b") else {
-            throw SkillError.executionFailed("Invalid FLUX API URL")
+        let selectedModelID = UserDefaults.standard.string(forKey: "selectedImageModelID") ?? "flux.2-klein-4b"
+        guard let imageModel = ImageModel.availableImageModels.first(where: { $0.id == selectedModelID }),
+              let url = URL(string: imageModel.endpointURL) else {
+            throw SkillError.executionFailed("Configuração de modelo de imagem inválida: \(selectedModelID)")
         }
         
         // Use NVIDIA API key from environment or keychain
@@ -54,7 +60,7 @@ struct ImageGenerationSkill: Skill {
             "width": min(width, 1024),
             "height": min(height, 1024),
             "seed": Int.random(in: 0...999999),
-            "steps": 4
+            "steps": imageModel.steps
         ]
         
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
@@ -62,17 +68,18 @@ struct ImageGenerationSkill: Skill {
         let (data, response) = try await URLSession.shared.data(for: request)
         
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw SkillError.executionFailed("Invalid response from FLUX API")
+            throw SkillError.executionFailed("Invalid response from NVIDIA NIM API")
         }
         
         guard httpResponse.statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "unknown"
-            throw SkillError.executionFailed("FLUX API error \(httpResponse.statusCode): \(body)")
+            let helpMsg = httpResponse.statusCode == 404 ? " (O modelo selecionado pode não estar hospedado na nuvem pública trial da NVIDIA)" : ""
+            throw SkillError.executionFailed("NVIDIA NIM API error \(httpResponse.statusCode): \(body)\(helpMsg)")
         }
         
-        // Parse the response — FLUX returns the image as base64
+        // Parse the response — NIM returns the image as base64
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw SkillError.executionFailed("Could not parse FLUX response")
+            throw SkillError.executionFailed("Could not parse NVIDIA NIM response")
         }
         
         // Response format: { "image": "<base64_data>" }  or { "artifacts": [{"base64": "..."}] }

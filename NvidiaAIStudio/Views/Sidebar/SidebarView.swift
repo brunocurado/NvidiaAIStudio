@@ -96,7 +96,7 @@ struct SidebarView: View {
                                     else { expandedProjects.insert(group.project) }
                                 }
                             },
-                            onSelect: { session in withAnimation(.easeInOut(duration: 0.15)) { appState.activeSessionID = session.id } },
+                            onSelect: { session in withAnimation(.easeInOut(duration: 0.15)) { appState.activeSessionID = session.id; appState.appMode = .chat } },
                             onHover: { sessionID, isHovered in hoveredSessionID = isHovered ? sessionID : nil },
                             onDelete: { appState.deleteSession($0) },
                             onRenameFolder: { old, new in
@@ -322,7 +322,9 @@ struct SidebarActionButton: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .glassEffect(
-                isHovered ? .clear.interactive() : .identity,
+                isHovered
+                    ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                    : .clear.interactive(),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .scaleEffect(isHovered ? 1.01 : 1.0)
@@ -355,7 +357,9 @@ struct WorkspaceSidebarButton: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .glassEffect(
-                isHovered ? .clear.interactive() : .identity,
+                isHovered
+                    ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                    : .clear.interactive(),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .scaleEffect(isHovered ? 1.01 : 1.0)
@@ -481,7 +485,9 @@ struct ThreadItemView: View {
         .glassEffect(
             isSelected
                 ? .clear.tint(theme.accentColor.opacity(0.18)).interactive()
-                : (isHovered ? .clear.interactive() : .identity),
+                : (isHovered
+                    ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                    : .clear.interactive()),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .scaleEffect(isSelected ? 1.005 : 1.0)
@@ -539,8 +545,10 @@ struct WarRoomSidebarButton: View {
             .padding(.vertical, 7)
             .glassEffect(
                 isActive
-                    ? .clear.tint(.green.opacity(0.18)).interactive()
-                    : (isHovered ? .clear.interactive() : .identity),
+                    ? .clear.tint(Color.green.opacity(0.18)).interactive()
+                    : (isHovered
+                        ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                        : .clear.interactive()),
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
             .scaleEffect(isHovered ? 1.01 : 1.0)

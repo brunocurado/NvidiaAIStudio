@@ -170,7 +170,12 @@ struct AgentTaskCard: View {
                         .strokeBorder(Color(hex: snapshot.agentColor).opacity(isSelected ? 0.4 : 0.15), lineWidth: 1)
                 )
         )
-        .glassEffect(isHovered || isSelected ? .regular : .identity, in: RoundedRectangle(cornerRadius: 12))
+        .glassEffect(
+            isHovered || isSelected
+                ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                : .clear.interactive(),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
         .scaleEffect(isHovered ? 1.005 : 1.0)
         .animation(.easeOut(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }

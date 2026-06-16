@@ -397,18 +397,12 @@ struct KnowledgePanelView: View {
     }
     
     private func startDigest() {
-        guard let apiKey = appState.activeAPIKey ?? EnvParser.loadNVIDIAKey(),
+        guard let service = ProviderServiceFactory.makeFromAppState(appState),
               let model = appState.selectedModel
         else {
             appState.showToast("No API key or model selected", level: .error)
             return
         }
-        
-        let service = ProviderServiceFactory.make(
-            provider: appState.activeProvider,
-            apiKey: apiKey,
-            customBaseURL: appState.apiKeys.first { $0.provider == appState.activeProvider && $0.isActive }?.customBaseURL
-        )
         
         // Find vision model for PDF page analysis
         let visionModel = appState.availableModels.first { $0.supportsVision }

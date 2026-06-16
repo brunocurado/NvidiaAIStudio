@@ -309,18 +309,7 @@ final class MCPConnection: Identifiable {
     // MARK: - SSE Transport
 
     private func connectSSE() async throws {
-        guard case .sse(let urlString, let headers) = config.transport,
-              let url = URL(string: urlString) else {
-            throw SkillError.executionFailed("Invalid SSE URL")
-        }
-        var req = URLRequest(url: url)
-        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
-        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        // SSE connection is maintained — for now we just verify it's reachable
-        let (_, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw SkillError.executionFailed("SSE server returned non-200")
-        }
+        throw SkillError.executionFailed("MCP SSE transport is not implemented yet. Use stdio MCP servers for now.")
     }
 
     // MARK: - JSON-RPC

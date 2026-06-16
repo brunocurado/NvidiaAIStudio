@@ -5,7 +5,7 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
     let id: String
     let name: String
     let provider: Provider
-    let contextWindow: Int
+    var contextWindow: Int
     let supportsThinking: Bool
     let supportsVision: Bool
     var isEnabled: Bool
@@ -70,6 +70,7 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
         AIModel(id: "meta/llama-3.3-70b-instruct", name: "⚡ Llama 3.3 70B — Rápido e fiável", contextWindow: 131_072),
         AIModel(id: "mistralai/mistral-large-3-675b-instruct-2512", name: "🦾 Mistral Large 3 — Peso Pesado Europeu", contextWindow: 131_072, supportsVision: true),
         AIModel(id: "minimaxai/minimax-m2.5", name: "🕵️ MiniMax M2.5 — Leve e versátil", contextWindow: 128_000),
+        AIModel(id: "minimaxai/minimax-m3", name: "🚀 MiniMax M3 — 1M Multimodal", contextWindow: 1_000_000, supportsThinking: true, supportsVision: true),
         
         // ── Thinking / Reasoning ──
         AIModel(id: "moonshotai/kimi-k2-thinking", name: "🌙 Kimi K2 Thinking — Raciocínio 256K", contextWindow: 262_144, supportsThinking: true),

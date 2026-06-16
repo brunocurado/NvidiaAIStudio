@@ -30,10 +30,12 @@ enum ProviderServiceFactory {
 
     /// Builds the service from AppState — picks the active provider and key automatically.
     static func makeFromAppState(_ appState: AppState) -> (any AIProvider)? {
-        guard let key = appState.activeAPIKey ?? EnvParser.loadNVIDIAKey() else { return nil }
+        let provider = appState.activeProvider
+        let key = appState.activeAPIKey ?? (provider == .nvidia ? EnvParser.loadNVIDIAKey() : nil)
+        guard let key else { return nil }
         let customURL = appState.apiKeys
-            .first { $0.provider == appState.activeProvider && $0.isActive }?
+            .first { $0.provider == provider && $0.isActive }?
             .customBaseURL
-        return make(provider: appState.activeProvider, apiKey: key, customBaseURL: customURL)
+        return make(provider: provider, apiKey: key, customBaseURL: customURL)
     }
 }

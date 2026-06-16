@@ -11,16 +11,19 @@ final class OpenAIAPIService: AIProvider {
     private let baseURL: String
     private let session: URLSession
     private let extraHeaders: [String: String]
+    
+    private static let sharedSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 3600
+        config.timeoutIntervalForResource = 7200
+        return URLSession(configuration: config)
+    }()
 
     init(apiKey: String, baseURL: String = "https://api.openai.com/v1", extraHeaders: [String: String] = [:]) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.extraHeaders = extraHeaders
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 3600
-        config.timeoutIntervalForResource = 7200
-        self.session = URLSession(configuration: config)
+        self.session = Self.sharedSession
     }
 
     // MARK: - AIProvider
@@ -113,14 +116,14 @@ final class OpenAIAPIService: AIProvider {
         // Max tokens — o1/o3 models use max_completion_tokens
         let isReasoningModel = model.id.hasPrefix("o1") || model.id.hasPrefix("o3")
         let isOpenRouter = baseURL.contains("openrouter.ai")
+        let outputLimit = maxOutputTokens(reasoningLevel: reasoningLevel)
         if isReasoningModel {
-            body["max_completion_tokens"] = 16000
+            body["max_completion_tokens"] = outputLimit
         } else if isOpenRouter {
-            // If the model has a massive context window (>200k), allow huge generation (131k)
-            // Otherwise, request a safe 16k output to leave enough room for the input context and prevent overflow.
-            body["max_tokens"] = model.contextWindow > 200_000 ? 131072 : 16000
+            body["max_tokens"] = outputLimit
+            body["provider"] = ["sort": "latency"]
         } else {
-            body["max_tokens"] = 16000
+            body["max_tokens"] = outputLimit
         }
 
         body["messages"] = messages.map { $0.toAPIDict() }
@@ -145,6 +148,14 @@ final class OpenAIAPIService: AIProvider {
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
+    }
+    
+    private func maxOutputTokens(reasoningLevel: ReasoningLevel) -> Int {
+        switch reasoningLevel {
+        case .high: return 8192
+        case .medium: return 6144
+        case .low, .off: return 4096
+        }
     }
 
     private func streamResponse(

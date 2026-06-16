@@ -34,21 +34,14 @@ struct SSHSkill: Skill {
             throw SkillError.executionFailed("SSH not configured. Go to Settings → SSH and add your VPS details.")
         }
         
-        // Build SSH command
-        var sshCmd = "ssh"
-        sshCmd += " -o StrictHostKeyChecking=no"
-        sshCmd += " -o ConnectTimeout=10"
+        var sshArgs = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10"]
         if !keyPath.isEmpty {
             let expanded = NSString(string: keyPath).expandingTildeInPath
-            sshCmd += " -i '\(expanded)'"
+            sshArgs.append(contentsOf: ["-i", expanded])
         }
-        sshCmd += " -p \(sshPort)"
-        sshCmd += " \(user)@\(host)"
-        sshCmd += " '\(command.replacingOccurrences(of: "'", with: "'\\''"))'"
-        sshCmd += " 2>&1"
+        sshArgs.append(contentsOf: ["-p", "\(sshPort)", "\(user)@\(host)", command])
         
-        let fullCmd = sshCmd
-        let result = await ShellHelper.run(fullCmd)
+        let result = await ShellHelper.runExecutable("ssh", arguments: sshArgs)
         
         var output = result.output
         if result.exitCode != 0 && !result.error.isEmpty {

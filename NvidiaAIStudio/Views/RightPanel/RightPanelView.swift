@@ -384,8 +384,7 @@ struct TerminalContent: View {
             let flag = isCommand ? "-c" : "-f"
             let escapedWord = lastWord.replacingOccurrences(of: "\"", with: "\\\"")
             // We use bash -c because compgen is a bash builtin
-            let script = "bash -c 'compgen \(flag) \"\(escapedWord)\"'"
-            let result = await ShellHelper.run(script)
+            let result = await ShellHelper.runExecutable("bash", arguments: ["-c", "compgen \(flag) \"\(escapedWord)\""])
             
             let matches = result.output.components(separatedBy: "\n").filter { !$0.isEmpty }
             if let bestMatch = matches.first {
@@ -486,7 +485,10 @@ struct DiffLine: Identifiable {
 /// Simple git diff helper
 enum GitHelper {
     static func getChangedFiles() async -> [DiffFile] {
-        let result = await ShellHelper.run("git diff HEAD --numstat 2>/dev/null || git diff --numstat 2>/dev/null")
+        var result = await ShellHelper.runExecutable("git", arguments: ["diff", "HEAD", "--numstat"])
+        if result.exitCode != 0 || result.output.isEmpty {
+            result = await ShellHelper.runExecutable("git", arguments: ["diff", "--numstat"])
+        }
         guard !result.output.isEmpty else { return [] }
         
         var files: [DiffFile] = []
@@ -500,7 +502,10 @@ enum GitHelper {
             let filename = String(parts[2])
             
             // Get the actual diff for this file
-            let diffResult = await ShellHelper.run("git diff HEAD -- \"\(filename)\" 2>/dev/null || git diff -- \"\(filename)\" 2>/dev/null")
+            var diffResult = await ShellHelper.runExecutable("git", arguments: ["diff", "HEAD", "--", filename])
+            if diffResult.exitCode != 0 || diffResult.output.isEmpty {
+                diffResult = await ShellHelper.runExecutable("git", arguments: ["diff", "--", filename])
+            }
             let diffLines = parseDiffLines(diffResult.output)
             
             files.append(DiffFile(
@@ -513,7 +518,7 @@ enum GitHelper {
         }
         
         // Also check for new (untracked) files
-        let untrackedResult = await ShellHelper.run("git ls-files --others --exclude-standard 2>/dev/null")
+        let untrackedResult = await ShellHelper.runExecutable("git", arguments: ["ls-files", "--others", "--exclude-standard"])
         for line in untrackedResult.output.split(separator: "\n") {
             let filename = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !filename.isEmpty else { continue }
@@ -577,13 +582,31 @@ enum ShellHelper {
         let exitCode: Int32
     }
     
-    static func run(_ command: String) async -> Result {
+    static func run(_ command: String, workingDirectory: String? = nil) async -> Result {
+        let holder = ShellProcessHolder()
+        return await withTaskCancellationHandler {
+            await runProcess("/bin/zsh", arguments: ["-c", command], workingDirectory: workingDirectory ?? NSHomeDirectory(), holder: holder)
+        } onCancel: {
+            holder.terminate()
+        }
+    }
+    
+    static func runExecutable(_ command: String, arguments: [String], workingDirectory: String? = nil) async -> Result {
+        let holder = ShellProcessHolder()
+        return await withTaskCancellationHandler {
+            await runProcess("/usr/bin/env", arguments: [command] + arguments, workingDirectory: workingDirectory, holder: holder)
+        } onCancel: {
+            holder.terminate()
+        }
+    }
+    
+    private static func runProcess(_ executable: String, arguments: [String], workingDirectory: String?, holder: ShellProcessHolder) async -> Result {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-                process.arguments = ["-c", command]
-                process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory())
+                process.executableURL = URL(fileURLWithPath: executable)
+                process.arguments = arguments
+                process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory ?? NSHomeDirectory())
                 
                 let outputPipe = Pipe()
                 let errorPipe = Pipe()
@@ -591,6 +614,7 @@ enum ShellHelper {
                 process.standardError = errorPipe
                 
                 do {
+                    holder.set(process)
                     try process.run()
                     
                     // Prevent deadlock: Read sequentially is usually fine if stderr is mostly empty.
@@ -604,11 +628,37 @@ enum ShellHelper {
                     let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     let error = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                     
+                    holder.clear(process)
                     continuation.resume(returning: Result(output: output, error: error, exitCode: process.terminationStatus))
                 } catch {
+                    holder.clear(process)
                     continuation.resume(returning: Result(output: "", error: error.localizedDescription, exitCode: -1))
                 }
             }
+        }
+    }
+}
+
+private final class ShellProcessHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    
+    func set(_ process: Process) {
+        lock.withLock { self.process = process }
+    }
+    
+    func clear(_ process: Process) {
+        lock.withLock {
+            if self.process === process {
+                self.process = nil
+            }
+        }
+    }
+    
+    func terminate() {
+        lock.withLock {
+            guard let process, process.isRunning else { return }
+            process.terminate()
         }
     }
 }

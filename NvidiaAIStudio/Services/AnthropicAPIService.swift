@@ -10,15 +10,18 @@ final class AnthropicAPIService: AIProvider {
     private let baseURL: String
     private let session: URLSession
     private let anthropicVersion = "2023-06-01"
+    
+    private static let sharedSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 3600
+        config.timeoutIntervalForResource = 7200
+        return URLSession(configuration: config)
+    }()
 
     init(apiKey: String, baseURL: String = "https://api.anthropic.com/v1") {
         self.apiKey = apiKey
         self.baseURL = baseURL
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 3600
-        config.timeoutIntervalForResource = 7200
-        self.session = URLSession(configuration: config)
+        self.session = Self.sharedSession
     }
 
     // MARK: - AIProvider
@@ -103,7 +106,7 @@ final class AnthropicAPIService: AIProvider {
 
         var body: [String: Any] = [
             "model": model.id,
-            "max_tokens": 16000,
+            "max_tokens": maxOutputTokens(reasoningLevel: reasoningLevel),
             "stream": true,
             "messages": anthropicMessages
         ]
@@ -116,8 +119,8 @@ final class AnthropicAPIService: AIProvider {
         if model.supportsThinking && reasoningLevel != .off {
             let budget: Int
             switch reasoningLevel {
-            case .high:   budget = 10000
-            case .medium: budget = 5000
+            case .high:   budget = 4096
+            case .medium: budget = 2048
             case .low:    budget = 1024
             case .off:    budget = 0
             }
@@ -154,9 +157,10 @@ final class AnthropicAPIService: AIProvider {
             case .user:
                 // Handle image attachments
                 let imageAttachments = msg.attachments.filter { $0.mimeType.starts(with: "image/") }
+                let textContent = msg.contentIncludingTextAttachments()
                 if !imageAttachments.isEmpty {
                     var contentParts: [[String: Any]] = [
-                        ["type": "text", "text": msg.content]
+                        ["type": "text", "text": textContent]
                     ]
                     for att in imageAttachments {
                         contentParts.append([
@@ -170,7 +174,7 @@ final class AnthropicAPIService: AIProvider {
                     }
                     result.append(["role": "user", "content": contentParts])
                 } else {
-                    result.append(["role": "user", "content": msg.content])
+                    result.append(["role": "user", "content": textContent])
                 }
 
             case .assistant:
@@ -216,6 +220,14 @@ final class AnthropicAPIService: AIProvider {
         }
 
         return result
+    }
+    
+    private func maxOutputTokens(reasoningLevel: ReasoningLevel) -> Int {
+        switch reasoningLevel {
+        case .high: return 8192
+        case .medium: return 6144
+        case .low, .off: return 4096
+        }
     }
 
     private func streamResponse(

@@ -15,6 +15,10 @@ enum ModelFetcher {
         ("deepseek-v4",                 1_000_000),
         ("gpt-4.1",                     1_000_000),
         ("qwen3.6",                     1_000_000),
+        ("minimax-m3",                  1_000_000),
+        ("minimax-m4",                  1_000_000),
+        ("llama-4",                     1_000_000),
+        ("nemotron-ultra",              1_000_000),
         
         // 262K context
         ("kimi-k2",                     262_144),
@@ -64,14 +68,16 @@ enum ModelFetcher {
     private static let thinkingPatterns = [
         "thinking", "deepseek", "qwq", "kimi", "o1", "o3", "o4",
         "qwen3-next", "qwen3.5", "nemotron-3-super",
-        "mistral-small-4", "mistral-medium-3", "mistral-large-3", "gemma-4"
+        "mistral-small-4", "mistral-medium-3", "mistral-large-3", "gemma-4",
+        "minimax-m3", "minimax-m4"
     ]
     
     /// Patterns that indicate vision/multimodal support
     private static let visionPatterns = [
         "-vl", "vision", "multimodal", "qwen3.5-122b", "qwen3.5-397b",
         "mistral-large-3", "mistral-small-4", "mistral-medium-3",
-        "nemotron-nano-12b-v2-vl", "gpt-4o", "gpt-4.1"
+        "nemotron-nano-12b-v2-vl", "gpt-4o", "gpt-4.1",
+        "minimax-m3", "minimax-m4"
     ]
     
     // MARK: - Fetch
@@ -153,12 +159,48 @@ enum ModelFetcher {
     /// Falls back to 128K if no pattern matches.
     private static func resolveContextWindow(for modelID: String) -> Int {
         let lowered = modelID.lowercased()
+        if let parsedSize = parseContextFromID(lowered) {
+            return parsedSize
+        }
         for entry in knownContextWindows {
             if lowered.contains(entry.pattern.lowercased()) {
                 return entry.contextWindow
             }
         }
         return 128_000  // safe default
+    }
+    
+    /// Extract context size from ID using regex (e.g. -1m, -256k)
+    private static func parseContextFromID(_ id: String) -> Int? {
+        let pattern = "(?:^|[^a-zA-Z0-9])(\\d+)(k|m)(?:$|[^a-zA-Z0-9])"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(id.startIndex..<id.endIndex, in: id)
+        if let match = regex.firstMatch(in: id, options: [], range: range) {
+            if let numRange = Range(match.range(at: 1), in: id),
+               let unitRange = Range(match.range(at: 2), in: id) {
+                let numStr = String(id[numRange])
+                let unitStr = String(id[unitRange]).lowercased()
+                if let num = Int(numStr) {
+                    if unitStr == "m" {
+                        return num * 1_000_000
+                    } else if unitStr == "k" {
+                        switch num {
+                        case 8: return 8_192
+                        case 16: return 16_384
+                        case 32: return 32_768
+                        case 64: return 65_536
+                        case 128: return 128_000
+                        case 256: return 262_144
+                        case 512: return 524_288
+                        default: return num * 1000
+                        }
+                    }
+                }
+            }
+        }
+        return nil
     }
     
     // MARK: - Merge

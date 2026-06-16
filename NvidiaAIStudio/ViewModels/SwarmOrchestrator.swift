@@ -31,15 +31,19 @@ final class SwarmOrchestrator {
     var isActive: Bool = false
     
     // MARK: - Event Bus (Mailbox)
-    
+
     /// The mailbox: UI writes here, the running agent reads it at its next natural pause.
     /// Key: Task ID, Value: Directive/Message
+    /// Marked @MainActor for thread safety — accessed from UI and agent loops.
+    @MainActor
     private var pendingDirectives: [UUID: String] = [:]
-    
+
     // Interrupt flags for immediate "CEO Priority Override" during API streams
+    @MainActor
     private var interruptFlags: [UUID: Bool] = [:]
-    
+
     /// Post a directive to a running agent. It will see it between tool executions.
+    @MainActor
     func postDirective(to taskID: UUID, message: String) {
         pendingDirectives[taskID] = message
     }
@@ -83,11 +87,13 @@ final class SwarmOrchestrator {
         // the CEO could just broadcast this back.
         
         guard let activeTask = activeTasks.first else { return }
-        
+
         print("🛑 Orchestrator intercepting Visual Error: Injecting to task \(activeTask)")
-        
-        // Inject as a system directive directly
-        self.postDirective(to: activeTask, message: "[URGENT VISUAL OVERRIDE] Dev server triggered a JS exception: \n\(trace)\nFix this issue immediately.")
+
+        // Inject as a system directive directly (thread-safe via MainActor)
+        Task { @MainActor in
+            self.postDirective(to: activeTask, message: "[URGENT VISUAL OVERRIDE] Dev server triggered a JS exception: \n\(trace)\nFix this issue immediately.")
+        }
     }
     
     private var activeJobHandles: [UUID: Task<Void, Never>] = [:]
@@ -199,6 +205,7 @@ final class SwarmOrchestrator {
     }
     
     /// Triggered by the UI when the CEO wants to immediately interrupt a speaking agent and inject a directive
+    @MainActor
     public func forceInterrupt(taskID: UUID, directive: String) {
         pendingDirectives[taskID] = directive
         interruptFlags[taskID] = true
@@ -242,6 +249,9 @@ final class SwarmOrchestrator {
             return
         }
         let safePreferredModelId = persona.preferredModelId
+        let accessLevel = await MainActor.run { [weak self] in self?.appState?.fileAccessLevel ?? .fullAccess }
+        let workspacePath = await MainActor.run { [weak self] in self?.appState?.activeWorkspacePath ?? "" }
+        let reasoningLevel = await MainActor.run { [weak self] in self?.appState?.reasoningLevel ?? .low }
         
         let agentModel = await MainActor.run { [weak self] () -> AIModel in
             guard let self = self, let appState = self.appState else {
@@ -361,6 +371,12 @@ final class SwarmOrchestrator {
             for swarmMsg in task.messages.sorted(by: { $0.timestamp < $1.timestamp }) {
                 if swarmMsg.role == "moderator" || swarmMsg.senderName == "CEO" {
                     messages.append(Message(role: .user, content: swarmMsg.content))
+                } else if swarmMsg.role == "agent_tool_call" {
+                    if let toolCalls = Self.decodeToolCallEnvelope(swarmMsg.content) {
+                        messages.append(Message(role: .assistant, content: "", toolCalls: toolCalls))
+                    }
+                } else if swarmMsg.role == "tool" {
+                    messages.append(Message(role: .tool, content: swarmMsg.content, toolCallId: swarmMsg.senderName))
                 } else if swarmMsg.role == "agent" {
                     if swarmMsg.senderName == currentPersona.name {
                         messages.append(Message(role: .assistant, content: swarmMsg.content))
@@ -388,24 +404,25 @@ final class SwarmOrchestrator {
             var accFinishReason: String? = nil
             
             do {
-                let stream = service.chat(
-                    messages: messages,
-                    model: agentModel,
-                    tools: activeTools,
-                    reasoningLevel: .medium
-                )
+                    let stream = service.chat(
+                        messages: messages,
+                        model: agentModel,
+                        tools: activeTools,
+                        reasoningLevel: reasoningLevel
+                    )
                 
                 for try await chunk in stream {
                     if Task.isCancelled { break }
-                    
-                    // CEO Priority Override Detection
-                    if self.interruptFlags[taskID] == true {
-                        self.interruptFlags[taskID] = false
+
+                    // CEO Priority Override Detection (thread-safe access via MainActor)
+                    let shouldInterrupt = await MainActor.run { self.interruptFlags[taskID] == true }
+                    if shouldInterrupt {
+                        await MainActor.run { self.interruptFlags[taskID] = false }
                         // Inject the tag so we know it was cut off
                         accContent += "...\n[INCOMPLETE: INTERRUPTED BY CEO INJECTION]"
                         break
                     }
-                    
+
                     if let c = chunk.content { accContent += c }
                     if let tc = chunk.toolCalls { accToolCalls = tc }
                     if let fr = chunk.finishReason { accFinishReason = fr }
@@ -450,6 +467,11 @@ final class SwarmOrchestrator {
             // Execute tool calls
             if let toolCalls = accToolCalls, !toolCalls.isEmpty {
                 messages.append(Message(role: .assistant, content: accContent, toolCalls: toolCalls))
+                task.messages.append(SwarmMessage(
+                    role: "agent_tool_call",
+                    content: Self.encodeToolCallEnvelope(toolCalls),
+                    senderName: currentPersona.name
+                ))
                 
                 task.logs.append("[\(Self.timestamp)] 🔧 Executing \(toolCalls.count) tool(s)")
                 try? context.save()
@@ -469,20 +491,33 @@ final class SwarmOrchestrator {
                     await withTaskGroup(of: (String, String).self) { group in
                         for tc in concurrentCalls {
                             group.addTask { [skillRegistry] in
-                                let result = (try? await skillRegistry.execute(name: tc.name, arguments: tc.arguments)) ?? "Error executing \(tc.name)"
+                                let result = (try? await skillRegistry.execute(
+                                    name: tc.name,
+                                    arguments: tc.arguments,
+                                    accessLevel: accessLevel,
+                                    workspacePath: workspacePath
+                                )) ?? "Error executing \(tc.name)"
                                 return (tc.id, result)
                             }
                         }
                         for await (toolID, result) in group {
                             messages.append(Message(role: .tool, content: result, toolCallId: toolID))
+                            task.messages.append(SwarmMessage(role: "tool", content: result, senderName: toolID))
                         }
+                        try? context.save()
                     }
                 }
                 
                 // Serial group
                 for tc in serialCalls {
-                    let result = (try? await skillRegistry.execute(name: tc.name, arguments: tc.arguments)) ?? "Error executing \(tc.name)"
+                    let result = (try? await skillRegistry.execute(
+                        name: tc.name,
+                        arguments: tc.arguments,
+                        accessLevel: accessLevel,
+                        workspacePath: workspacePath
+                    )) ?? "Error executing \(tc.name)"
                     messages.append(Message(role: .tool, content: result, toolCallId: tc.id))
+                    task.messages.append(SwarmMessage(role: "tool", content: result, senderName: tc.id))
                     task.logs.append("[\(Self.timestamp)] ✅ \(tc.name) completed")
                     try? context.save()
                 }
@@ -578,7 +613,7 @@ final class SwarmOrchestrator {
             let synthesisMessages = [Message(role: .system, content: synthesisPrompt)]
             var synthesisContent = ""
             do {
-                let stream = service.chat(messages: synthesisMessages, model: agentModel, tools: nil, reasoningLevel: .medium)
+                let stream = service.chat(messages: synthesisMessages, model: agentModel, tools: nil, reasoningLevel: reasoningLevel)
                 for try await chunk in stream {
                     if Task.isCancelled { break }
                     if let c = chunk.content { synthesisContent += c }
@@ -607,25 +642,50 @@ final class SwarmOrchestrator {
     }
     
     // MARK: - The COO Engine (Auto-Decomposition)
-    
+
+    /// Validates and parses the COO LLM output into a structured task array.
+    /// Returns nil if the output is malformed or doesn't match the expected schema.
+    private func validateCOOOutput(_ content: String) -> [[String: Any]]? {
+        let cleanJson = content
+            .replacingOccurrences(of: "```json", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let data = cleanJson.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+
+        // Validate schema: each task must have taskDescription and roleName
+        for task in parsed {
+            guard let desc = task["taskDescription"] as? String, !desc.isEmpty,
+                  let role = task["roleName"] as? String, !role.isEmpty else {
+                return nil
+            }
+        }
+
+        return parsed.isEmpty ? nil : parsed
+    }
+
     /// Phase 4: Takes a global directive, uses an LLM to break it into sub-tasks, matches to models, and spawns agents.
     func autoDecompose(directive: String) {
         // Placeholder for UI feedback if needed
         Task {
             guard let appState = await MainActor.run(body: { self.appState }),
                   let service = await MainActor.run(body: { ProviderServiceFactory.makeFromAppState(appState) }) else { return }
-            
+
             let modelsList = await MainActor.run { appState.availableModels.map { "\($0.name) (\($0.id))" }.joined(separator: ", ") }
             let cooModel = await MainActor.run { appState.selectedModel ?? AIModel.defaultModels.first! }
-            
+            let reasoningLevel = await MainActor.run { appState.reasoningLevel }
+
             let cooPrompt = """
             You are the Swarm Chief Operating Officer (COO).
             The CEO has given you a high-level directive.
             Break this down into specific parallel or sequential sub-tasks for specialized agents.
-            
+
             Available LLM Models for routing:
             \(modelsList)
-            
+
             Return ONLY a raw JSON array of objects representing the tasks. Do not use markdown blocks.
             Format:
             [
@@ -636,46 +696,60 @@ final class SwarmOrchestrator {
               }
             ]
             """
-            
+
             await MainActor.run { appState.showToast("COO: Analysing Directive & Routing Models...", level: .info) }
-            
+
             let messages = [
                 Message(role: .system, content: cooPrompt),
                 Message(role: .user, content: directive)
             ]
-            
-            do {
-                var accContent = ""
-                let stream = service.chat(messages: messages, model: cooModel, tools: nil, reasoningLevel: .medium)
-                for try await chunk in stream {
-                    if let c = chunk.content { accContent += c }
+
+            // Retry up to 3 times if the LLM produces invalid JSON
+            var decodedTasks: [[String: Any]]? = nil
+            var lastError: String = ""
+
+            for attempt in 1...3 {
+                do {
+                    var accContent = ""
+                    let stream = service.chat(messages: messages, model: cooModel, tools: nil, reasoningLevel: reasoningLevel)
+                    for try await chunk in stream {
+                        if let c = chunk.content { accContent += c }
+                    }
+
+                    if let parsed = validateCOOOutput(accContent) {
+                        decodedTasks = parsed
+                        break
+                    } else {
+                        lastError = "Invalid JSON schema"
+                        print("⚠️ COO attempt \(attempt): \(lastError)")
+                    }
+                } catch {
+                    lastError = error.localizedDescription
+                    print("⚠️ COO attempt \(attempt) error: \(lastError)")
                 }
-                
-                let cleanJson = accContent
-                    .replacingOccurrences(of: "```json", with: "")
-                    .replacingOccurrences(of: "```", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                
-                guard let data = cleanJson.data(using: .utf8),
-                      let decodedTasks = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-                    await MainActor.run { appState.showToast("COO: Failed to parse task schema.", level: .error) }
-                    return
-                }
-                
+            }
+
+            guard let decodedTasks = decodedTasks else {
                 await MainActor.run {
-                    let context = ModelContext(self.modelContainer)
-                    for t in decodedTasks {
-                        guard let desc = t["taskDescription"] as? String,
-                              let role = t["roleName"] as? String else { continue }
-                        let mod = t["suggestedModelId"] as? String
-                        
-                        let workspacePath = appState.activeSession?.projectPath ?? ""
-                        let treeMap = workspacePath.isEmpty ? "No active workspace mapped." : self.scanWorkspace(path: workspacePath)
-                        
-                        let persona = AgentPersona(
-                            name: "Temp-\(Int.random(in: 100...999))",
-                            roleName: role,
-                            systemPrompt: """
+                    appState.showToast("COO: Failed after 3 attempts. \(lastError)", level: .error)
+                }
+                return
+            }
+
+            await MainActor.run {
+                let context = ModelContext(self.modelContainer)
+                for t in decodedTasks {
+                    guard let desc = t["taskDescription"] as? String,
+                          let role = t["roleName"] as? String else { continue }
+                    let mod = t["suggestedModelId"] as? String
+
+                    let workspacePath = appState.activeSession?.projectPath ?? ""
+                    let treeMap = workspacePath.isEmpty ? "No active workspace mapped." : self.scanWorkspace(path: workspacePath)
+
+                    let persona = AgentPersona(
+                        name: "Temp-\(Int.random(in: 100...999))",
+                        roleName: role,
+                        systemPrompt: """
 You are a specialized \(role).
 You MUST strictly use the native JSON tool schema provided. DO NOT simulate tools. DO NOT describe in prose what a function call 'does'.
 If you need to search, read, write to a file, or run terminal commands, execute the actual tool natively. Output your final work in plain text unless told otherwise.
@@ -687,25 +761,20 @@ Current Codebase Layout Context:
 
 Strict mandate: \(desc)
 """,
-                            accentColorHex: ["#FF9800", "#E91E63", "#00BCD4", "#8BC34A", "#9C27B0"].randomElement()!,
-                            preferredModelId: mod
-                        )
-                        context.insert(persona)
-                        
-                        let task = SwarmTask(taskDescription: desc, priority: 1, type: "standard", assignedAgent: persona)
-                        context.insert(task)
-                        
-                        // Tell the War Room to visibly spawn this agent on the Canvas Grid
-                        NotificationCenter.default.post(name: NSNotification.Name("SpawnCanvasNode"), object: persona)
-                    }
-                    try? context.save()
-                    self.refreshSnapshots()
-                    appState.showToast("COO created \(decodedTasks.count) agents and micro-tasks!", level: .success)
+                        accentColorHex: ["#FF9800", "#E91E63", "#00BCD4", "#8BC34A", "#9C27B0"].randomElement()!,
+                        preferredModelId: mod
+                    )
+                    context.insert(persona)
+
+                    let task = SwarmTask(taskDescription: desc, priority: 1, type: "standard", assignedAgent: persona)
+                    context.insert(task)
+
+                    // Tell the War Room to visibly spawn this agent on the Canvas Grid
+                    NotificationCenter.default.post(name: NSNotification.Name("SpawnCanvasNode"), object: persona)
                 }
-                
-            } catch {
-                await MainActor.run { appState.showToast("COO Error: \(error.localizedDescription)", level: .error) }
-                print("COO Error: \(error)")
+                try? context.save()
+                self.refreshSnapshots()
+                appState.showToast("COO created \(decodedTasks.count) agents and micro-tasks!", level: .success)
             }
         }
     }
@@ -735,6 +804,64 @@ Strict mandate: \(desc)
         context.insert(task)
         try? context.save()
         refreshSnapshots()
+    }
+
+    /// Launch a background agent for the Chat system (replaces legacy AgentCoordinator).
+    /// Creates a temporary persona and a SwarmTask, then returns the task for UI tracking.
+    @MainActor
+    func launchBackgroundAgent(goal: String, modelID: String, sessionID: UUID, appState: AppState) -> SwarmTask? {
+        let context = ModelContext(modelContainer)
+
+        // Create a temporary persona for this background agent
+        let shortID = UUID().uuidString.prefix(4)
+        let persona = AgentPersona(
+            name: "BG-\(shortID)",
+            roleName: "Background Agent",
+            systemPrompt: """
+            You are an autonomous background agent. Your goal is:
+            \(goal)
+            Work independently, use available tools, and complete the goal.
+            When done, summarise what you accomplished in your final message.
+            """,
+            accentColorHex: "#76B900",
+            preferredModelId: modelID
+        )
+        context.insert(persona)
+
+        // Create the task
+        let task = SwarmTask(
+            taskDescription: goal,
+            priority: 1,
+            type: "background",
+            assignedAgent: persona
+        )
+        context.insert(task)
+
+        do {
+            try context.save()
+        } catch {
+            print("⚠️ Failed to launch background agent: \(error.localizedDescription)")
+            return nil
+        }
+
+        refreshSnapshots()
+        return task
+    }
+
+    /// Cancel a background agent by task ID.
+    @MainActor
+    func cancelBackgroundAgent(taskID: UUID) {
+        cancelAgent(for: taskID)
+    }
+
+    /// Fetch a SwarmTask by ID (for UI display).
+    @MainActor
+    func backgroundAgentTask(id: UUID) -> SwarmTask? {
+        let context = ModelContext(modelContainer)
+        let descriptor = FetchDescriptor<SwarmTask>(
+            predicate: #Predicate { $0.id == id }
+        )
+        return try? context.fetch(descriptor).first
     }
     
     /// Fetch all agent personas from SwiftData.
@@ -879,6 +1006,19 @@ Strict mandate: \(desc)
         output += "\(rootURL.lastPathComponent)/\n"
         scanDirectory(url: rootURL, prefix: "", currentDepth: 1)
         return output
+    }
+    
+    private static func encodeToolCallEnvelope(_ toolCalls: [Message.ToolCall]) -> String {
+        guard let data = try? JSONEncoder().encode(toolCalls),
+              let json = String(data: data, encoding: .utf8) else {
+            return "[]"
+        }
+        return json
+    }
+    
+    private static func decodeToolCallEnvelope(_ raw: String) -> [Message.ToolCall]? {
+        guard let data = raw.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([Message.ToolCall].self, from: data)
     }
 }
 

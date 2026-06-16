@@ -161,10 +161,15 @@ struct DeliverableListItem: View {
             .padding(.vertical, 8)
             .background(
                 isSelected
-                    ? RoundedRectangle(cornerRadius: 8).fill(.blue.opacity(0.12))
-                    : (isHovered ? RoundedRectangle(cornerRadius: 8).fill(GlassTheme.flatFill) : nil)
+                    ? RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.15))
+                    : nil
             )
-            .glassEffect(isSelected || isHovered ? .regular : .identity, in: RoundedRectangle(cornerRadius: 8))
+            .glassEffect(
+                isSelected || isHovered
+                    ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                    : .clear.interactive(),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

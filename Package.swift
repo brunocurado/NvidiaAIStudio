@@ -24,6 +24,11 @@ let package = Package(
                 .swiftLanguageMode(.v5)
             ]
         ),
+        .testTarget(
+            name: "NvidiaAIStudioTests",
+            dependencies: ["NvidiaAIStudio"],
+            path: "Tests/NvidiaAIStudioTests"
+        ),
 
     ]
 )

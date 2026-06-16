@@ -3,13 +3,32 @@ import SwiftUI
 // MARK: - Agent Detail View
 
 /// Full view of a running/completed background agent.
+/// Uses SwarmOrchestrator as the single source of truth (replaces legacy AgentCoordinator).
 struct AgentDetailView: View {
     let agentID: UUID
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
-    @State private var coordinator = AgentCoordinator.shared
+    @State private var task: SwarmTask?
+    @State private var refreshTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
-    private var task: AgentTask? { coordinator.task(id: agentID) }
+    private var statusRaw: String { task?.status ?? "unknown" }
+    private var statusLabel: String {
+        switch statusRaw {
+        case "running": return "Running"
+        case "completed": return "Completed"
+        case "failed": return "Failed"
+        case "pending": return "Pending"
+        default: return statusRaw.capitalized
+        }
+    }
+    private var statusColor: Color {
+        switch statusRaw {
+        case "running": return .green
+        case "completed": return .blue
+        case "failed": return .red
+        default: return .orange
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,10 +37,10 @@ struct AgentDetailView: View {
                 Circle()
                     .fill(statusColor)
                     .frame(width: 10, height: 10)
-                    .symbolEffect(.pulse, isActive: task?.status == .running || task?.status == .thinking)
+                    .symbolEffect(.pulse, isActive: statusRaw == "running")
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(task?.goal ?? "Agent")
+                    Text(task?.taskDescription ?? "Agent")
                         .font(.headline)
                         .lineLimit(2)
                     Text(statusLabel)
@@ -31,9 +50,9 @@ struct AgentDetailView: View {
 
                 Spacer()
 
-                if task?.status == .running || task?.status == .thinking || task?.status == .reading {
+                if statusRaw == "running" || statusRaw == "pending" {
                     Button("Cancel") {
-                        Task { await MainActor.run { coordinator.cancelAgent(id: agentID, appState: appState) } }
+                        appState.orchestrator.cancelBackgroundAgent(taskID: agentID)
                     }
                     .foregroundStyle(.red)
                     .buttonStyle(.bordered)
@@ -48,26 +67,26 @@ struct AgentDetailView: View {
 
             Divider()
 
-            if let result = task?.result, !result.isEmpty {
+            if let result = task?.errorMessage, !result.isEmpty {
                 // Result banner
                 VStack(alignment: .leading, spacing: 6) {
-                    Label(task?.status == .completed ? "Completed" : "Result", systemImage: task?.status == .completed ? "checkmark.circle.fill" : "info.circle.fill")
+                    Label(statusRaw == "completed" ? "Completed" : "Result", systemImage: statusRaw == "completed" ? "checkmark.circle.fill" : "info.circle.fill")
                         .font(.caption)
                         .fontWeight(.semibold)
-                        .foregroundStyle(task?.status == .completed ? .green : .secondary)
+                        .foregroundStyle(statusRaw == "completed" ? .green : .secondary)
                     Text(result)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
                 .padding()
-                .background((task?.status == .completed ? Color.green : Color.blue).opacity(0.08))
+                .background((statusRaw == "completed" ? Color.green : Color.blue).opacity(0.08))
 
                 Divider()
             }
 
             // Message history
-            if let messages = task?.messages.filter({ $0.role != .system }), !messages.isEmpty {
+            if let messages = task?.messages.filter({ $0.role != "system" }), !messages.isEmpty {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
@@ -85,7 +104,7 @@ struct AgentDetailView: View {
             } else {
                 Spacer()
                 VStack(spacing: 8) {
-                    if task?.status == .thinking || task?.status == .running {
+                    if statusRaw == "running" || statusRaw == "pending" {
                         ProgressView()
                         Text("Agent is working...")
                             .font(.caption)
@@ -99,44 +118,55 @@ struct AgentDetailView: View {
             }
         }
         .frame(width: 560, height: 500)
+        .onAppear { refreshTask() }
+        .onReceive(refreshTimer) { _ in refreshTask() }
     }
 
-    private var statusColor: Color {
-        switch task?.status {
-        case .thinking: return .orange
-        case .running:  return .blue
-        case .reading:  return .purple
-        case .completed: return .green
-        case .failed:   return .red
-        default:        return .gray
-        }
-    }
-
-    private var statusLabel: String {
-        switch task?.status {
-        case .thinking:  return "Thinking..."
-        case .running:   return "Running tools..."
-        case .reading:   return "Reading files..."
-        case .completed: return "Completed"
-        case .failed:    return "Failed"
-        default:         return "Waiting"
-        }
+    private func refreshTask() {
+        task = appState.orchestrator.backgroundAgentTask(id: agentID)
     }
 }
 
 struct AgentMessageRow: View {
-    let message: Message
+    let message: SwarmMessage
+
+    private var icon: String {
+        switch message.role {
+        case "user": return "person.circle.fill"
+        case "tool": return "wrench.fill"
+        case "moderator": return "crown.fill"
+        default: return "cpu.fill"
+        }
+    }
+
+    private var iconColor: Color {
+        switch message.role {
+        case "user": return .blue
+        case "tool": return .orange
+        case "moderator": return .yellow
+        default: return .green
+        }
+    }
+
+    private var label: String {
+        switch message.role {
+        case "user": return "User"
+        case "tool": return "Tool Result"
+        case "moderator": return "Moderator"
+        default: return message.senderName.isEmpty ? "Agent" : message.senderName
+        }
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            Image(systemName: message.role == .user ? "person.circle.fill" : (message.role == .tool ? "wrench.fill" : "cpu.fill"))
+            Image(systemName: icon)
                 .font(.caption)
-                .foregroundStyle(message.role == .user ? .blue : (message.role == .tool ? .orange : .green))
+                .foregroundStyle(iconColor)
                 .frame(width: 20)
                 .padding(.top, 2)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(message.role == .user ? "Goal" : (message.role == .tool ? "Tool Result" : "Agent"))
+                Text(label)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fontWeight(.semibold)
@@ -145,7 +175,7 @@ struct AgentMessageRow: View {
                     Text(message.content)
                         .font(.caption)
                         .textSelection(.enabled)
-                        .lineLimit(message.role == .tool ? 4 : nil)
+                        .lineLimit(message.role == "tool" ? 4 : nil)
                 }
             }
         }
@@ -161,7 +191,6 @@ struct NewAgentSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var goal = ""
     @State private var selectedModelID: String = ""
-    @State private var coordinator = AgentCoordinator.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -234,7 +263,7 @@ struct NewAgentSheet: View {
                         let g = goal; let sid = session.id
                         Task {
                             await MainActor.run {
-                                _ = coordinator.launchAgent(goal: g, modelID: modelID, sessionID: sid, appState: appState)
+                                _ = appState.orchestrator.launchBackgroundAgent(goal: g, modelID: modelID, sessionID: sid, appState: appState)
                             }
                         }
                         dismiss()

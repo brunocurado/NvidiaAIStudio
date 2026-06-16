@@ -74,6 +74,66 @@ final class ChatViewModel {
         isStreaming = false
     }
     
+    private func extractLongCatToolCalls(from content: String) -> (toolCalls: [Message.ToolCall], cleanedContent: String) {
+        let namePattern = #"<longcat_tool_call>\s*([^<]+?)\s*</longcat_tool_call>"#
+        guard let nameRegex = try? NSRegularExpression(pattern: namePattern, options: [.dotMatchesLineSeparators]) else {
+            return ([], content)
+        }
+        
+        var cleanedContent = content
+        var toolCalls: [Message.ToolCall] = []
+        let nsContent = content as NSString
+        let matches = nameRegex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
+        
+        for (index, match) in matches.enumerated().reversed() {
+            guard match.numberOfRanges == 2 else { continue }
+            
+            let name = nsContent.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let nextStart = index + 1 < matches.count ? matches[index + 1].range.location : nsContent.length
+            let blockRange = NSRange(location: match.range.location, length: nextStart - match.range.location)
+            let rawBlock = nsContent.substring(with: blockRange)
+            let arguments = longCatArguments(from: rawBlock)
+            
+            guard !name.isEmpty else { continue }
+            let id = "longcat_call_" + UUID().uuidString.prefix(8)
+            toolCalls.insert(Message.ToolCall(id: String(id), name: name, arguments: arguments, status: .pending), at: 0)
+            cleanedContent = (cleanedContent as NSString).replacingCharacters(in: blockRange, with: "")
+        }
+        
+        return (toolCalls, cleanedContent.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    
+    private func longCatArguments(from block: String) -> String {
+        var args: [String: String] = [:]
+        collectLongCatArguments(from: block, pattern: #"<longcat_arg_key>\s*([\s\S]*?)\s*</longcat_arg_key>\s*<longcat_arg_value>\s*([\s\S]*?)\s*</longcat_arg_value>"#, keyRange: 1, valueRange: 2, into: &args)
+        collectLongCatArguments(from: block, pattern: #"<longcat_arg_value>\s*([\s\S]*?)\s*</longcat_arg_value>\s*<longcat_arg_key>\s*([\s\S]*?)\s*</longcat_arg_key>"#, keyRange: 2, valueRange: 1, into: &args)
+        
+        guard !args.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: args),
+              let json = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return json
+    }
+    
+    private func collectLongCatArguments(
+        from block: String,
+        pattern: String,
+        keyRange: Int,
+        valueRange: Int,
+        into args: inout [String: String]
+    ) {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return }
+        let nsBlock = block as NSString
+        let matches = regex.matches(in: block, range: NSRange(location: 0, length: nsBlock.length))
+        for match in matches where match.numberOfRanges > max(keyRange, valueRange) {
+            let key = nsBlock.substring(with: match.range(at: keyRange)).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = nsBlock.substring(with: match.range(at: valueRange)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty {
+                args[key] = value
+            }
+        }
+    }
+    
     // MARK: - Agent Loop
     
     private func agentLoop(
@@ -94,8 +154,11 @@ final class ChatViewModel {
             
             // Collect messages to send BEFORE inserting the placeholder
             let messagesToSend = await MainActor.run {
-                // Build system prompt (Knowledge Base is now accessed via the search_knowledge_base skill)
-                let systemContent = SystemPrompt.defaultCoding
+                // Build system prompt with workspace context (dynamic injection)
+                let systemContent = SystemPrompt.build(
+                    workspacePath: appState.activeWorkspacePath,
+                    branch: appState.currentBranch
+                )
                 var msgs = [SystemPrompt.asMessage(systemContent)]
                 
                 // Use the model's defined context window
@@ -126,22 +189,17 @@ final class ChatViewModel {
                 self.contextUsage = Double(tokenCount) / Double(resolvedMaxTokens)
                 
                 // Auto-Compaction threshold check - Feature #3
+                // Use real LLM-based summarization instead of destructive content clearing
                 if self.contextUsage > 0.8 {
-                    var compactMsgs: [Message] = []
-                    for (i, m) in msgs.enumerated() {
-                        var compact = m
-                        if i < msgs.count - 10 && m.role != .system {
-                            if m.content.count > 500 {
-                                compact.content = "[Compacted turn (Older than 10 turns) - Content cleared due to reaching 80% Context window payload]"
-                            }
-                        }
-                        compactMsgs.append(compact)
-                    }
-                    msgs = compactMsgs
-                    self.contextUsage -= 0.2 // Fake update for UI
+                    let messagesToCompress = msgs
                     Task { @MainActor in
-                        appState.showToast("Context hit 80%. Pruning history.", level: .warning)
+                        appState.showToast("Context hit 80%. Summarizing history...", level: .warning)
+                        await self.compressContext(appState: appState)
+                        self.contextUsage -= 0.2 // Approximate update for UI
                     }
+                    // For this iteration, still send the messages but mark them as pending compaction
+                    // The next iteration will pick up the compressed state
+                    _ = messagesToCompress
                 }
                 
                 // (Vision attachments from KB are now handled selectively by the tool or disabled to save tokens)
@@ -225,6 +283,12 @@ final class ChatViewModel {
                 let finalReasoning = accReasoning
                 var extractedToolCalls = accToolCalls ?? []
                 
+                let longCatResult = extractLongCatToolCalls(from: finalContent)
+                if !longCatResult.toolCalls.isEmpty {
+                    extractedToolCalls.append(contentsOf: longCatResult.toolCalls)
+                    finalContent = longCatResult.cleanedContent
+                }
+                
                 // DeepSeek V4-Pro/Claude XML Tool Call Parser
                 let pattern = "<tool_call\\s+name=\"([^\"]+)\">\\s*(.*?)\\s*</tool_call>"
                 if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) {
@@ -281,10 +345,11 @@ final class ChatViewModel {
                 finalContent = finalContent.replacingOccurrences(of: "<|DSML|tool_calls>", with: "").replacingOccurrences(of: "</|DSML|tool_calls>", with: "")
                 
                 finalContent = finalContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                let completedContent = finalContent
                 let finalToolCalls = extractedToolCalls.isEmpty ? nil : extractedToolCalls
                 
                 await MainActor.run {
-                    self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: finalContent, reasoning: finalReasoning, toolCalls: finalToolCalls, isStreaming: false), in: appState)
+                    self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: completedContent, reasoning: finalReasoning, toolCalls: finalToolCalls, isStreaming: false), in: appState)
                 }
                 
                 // Query Loop Recovery - Feature #1
@@ -398,7 +463,7 @@ final class ChatViewModel {
         
         await MainActor.run {
             self.isStreaming = false
-            appState.showToast("Agent loop reached maximum iterations (10)", level: .warning)
+            appState.showToast("Agent loop reached maximum iterations (\(maxIterations))", level: .warning)
             appState.saveActiveSession()
         }
     }
@@ -466,9 +531,13 @@ final class ChatViewModel {
                 result[result.count - 1] = Message(
                     id: prev.id, role: prev.role,
                     content: prev.content + "\n" + msg.content,
+                    attachments: prev.attachments + msg.attachments,
+                    timestamp: prev.timestamp,
                     reasoning: msg.reasoning ?? prev.reasoning,
                     toolCalls: msg.toolCalls ?? prev.toolCalls,
-                    toolCallId: msg.toolCallId ?? prev.toolCallId
+                    toolCallId: msg.toolCallId ?? prev.toolCallId,
+                    isStreaming: prev.isStreaming || msg.isStreaming,
+                    statusBadges: prev.statusBadges + msg.statusBadges
                 )
                 continue
             }
@@ -550,7 +619,7 @@ final class ChatViewModel {
     func compressContext(appState: AppState) async {
         guard let session = appState.activeSession,
               let model = appState.selectedModel,
-              let apiKey = appState.activeAPIKey ?? (appState.activeProvider == .nvidia ? EnvParser.loadNVIDIAKey() : nil) else { return }
+              let service = ProviderServiceFactory.makeFromAppState(appState) else { return }
         let messages = session.messages
         let keepLast = 6
         guard messages.count > keepLast + 2 else { return }
@@ -569,7 +638,6 @@ final class ChatViewModel {
             Message(role: .user, content: transcript)
         ]
         streamingStatus = "Compressing context…"
-        let service = ProviderServiceFactory.make(provider: appState.activeProvider, apiKey: apiKey)
         var summary = ""
         do {
             for try await chunk in service.chat(messages: summaryRequest, model: model, tools: nil, reasoningLevel: .off) {
@@ -679,7 +747,7 @@ final class ChatViewModel {
             }
             
             // UI & Memory Protection: Truncate massively oversized tool outputs
-            if result.count > 100_000 {
+            if result.count > 100_000 && toolCall.name != "generate_image" {
                 rawResult = String(result.prefix(100_000)) + "\n\n... [TRUNCATED: The output exceeded 100,000 characters and was truncated to protect application memory. This usually happens when listing a massive directory. Please use `run_command` with constraints (e.g. find . -maxdepth 2) instead.]"
             } else {
                 rawResult = result

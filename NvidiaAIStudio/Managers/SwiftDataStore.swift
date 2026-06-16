@@ -38,19 +38,8 @@ actor SwiftDataStore {
         sdSession.updatedAt = session.updatedAt
         sdSession.projectPath = session.projectPath
         
-        // Overwrite Messages
-        // Delete old
-        for oldMsg in sdSession.messages {
-            modelContext.delete(oldMsg)
-        }
-        // Insert new
-        sdSession.messages = session.messages.map { translate(from: $0) }
-        
-        // Overwrite background agents
-        for oldAgent in sdSession.backgroundAgents {
-            modelContext.delete(oldAgent)
-        }
-        sdSession.backgroundAgents = session.backgroundAgents.map { translate(from: $0) }
+        reconcileMessages(on: sdSession, with: session.messages)
+        reconcileBackgroundAgents(on: sdSession, with: session.backgroundAgents)
         
         try? modelContext.save()
     }
@@ -163,5 +152,120 @@ actor SwiftDataStore {
     
     private func translate(from b: BackgroundAgent) -> SDBackgroundAgent {
         SDBackgroundAgent(id: b.id, name: b.name, task: b.task, statusRaw: b.status.rawValue)
+    }
+    
+    private func reconcileMessages(on session: SDSession, with messages: [Message]) {
+        var existingByID = Dictionary(uniqueKeysWithValues: session.messages.map { ($0.id, $0) })
+        var nextMessages: [SDMessage] = []
+        
+        for message in messages {
+            if let existing = existingByID.removeValue(forKey: message.id) {
+                update(existing, from: message)
+                nextMessages.append(existing)
+            } else {
+                nextMessages.append(translate(from: message))
+            }
+        }
+        
+        for stale in existingByID.values {
+            modelContext.delete(stale)
+        }
+        session.messages = nextMessages
+    }
+    
+    private func update(_ sd: SDMessage, from message: Message) {
+        sd.roleRaw = message.role.rawValue
+        sd.content = message.content
+        sd.timestamp = message.timestamp
+        sd.reasoning = message.reasoning
+        sd.toolCallId = message.toolCallId
+        sd.isStreaming = message.isStreaming
+        reconcileAttachments(on: sd, with: message.attachments)
+        reconcileToolCalls(on: sd, with: message.toolCalls)
+        reconcileStatusBadges(on: sd, with: message.statusBadges)
+    }
+    
+    private func reconcileAttachments(on message: SDMessage, with attachments: [Message.Attachment]) {
+        var existingByID = Dictionary(uniqueKeysWithValues: message.attachments.map { ($0.id, $0) })
+        var nextAttachments: [SDAttachment] = []
+        
+        for attachment in attachments {
+            if let existing = existingByID.removeValue(forKey: attachment.id) {
+                existing.filename = attachment.filename
+                existing.mimeType = attachment.mimeType
+                existing.contentData = attachment.data
+                nextAttachments.append(existing)
+            } else {
+                nextAttachments.append(translate(from: attachment))
+            }
+        }
+        
+        for stale in existingByID.values {
+            modelContext.delete(stale)
+        }
+        message.attachments = nextAttachments
+    }
+    
+    private func reconcileToolCalls(on message: SDMessage, with toolCalls: [Message.ToolCall]?) {
+        var existingByID = Dictionary(uniqueKeysWithValues: (message.toolCalls ?? []).map { ($0.idString, $0) })
+        var nextToolCalls: [SDToolCall] = []
+        
+        for toolCall in toolCalls ?? [] {
+            if let existing = existingByID.removeValue(forKey: toolCall.id) {
+                existing.name = toolCall.name
+                existing.arguments = toolCall.arguments
+                existing.result = toolCall.result
+                existing.statusRaw = toolCall.status.rawValue
+                nextToolCalls.append(existing)
+            } else {
+                nextToolCalls.append(translate(from: toolCall))
+            }
+        }
+        
+        for stale in existingByID.values {
+            modelContext.delete(stale)
+        }
+        message.toolCalls = toolCalls == nil ? nil : nextToolCalls
+    }
+    
+    private func reconcileStatusBadges(on message: SDMessage, with statusBadges: [Message.StatusBadge]) {
+        var existingByID = Dictionary(uniqueKeysWithValues: message.statusBadges.map { ($0.id, $0) })
+        var nextStatusBadges: [SDStatusBadge] = []
+        
+        for badge in statusBadges {
+            if let existing = existingByID.removeValue(forKey: badge.id) {
+                existing.text = badge.text
+                existing.icon = badge.icon
+                nextStatusBadges.append(existing)
+            } else {
+                nextStatusBadges.append(translate(from: badge))
+            }
+        }
+        
+        for stale in existingByID.values {
+            modelContext.delete(stale)
+        }
+        message.statusBadges = nextStatusBadges
+    }
+    
+    private func reconcileBackgroundAgents(on session: SDSession, with agents: [BackgroundAgent]) {
+        var existingByID = Dictionary(uniqueKeysWithValues: session.backgroundAgents.map { ($0.id, $0) })
+        var nextAgents: [SDBackgroundAgent] = []
+        
+        for agent in agents {
+            if let existing = existingByID.removeValue(forKey: agent.id) {
+                existing.name = agent.name
+                existing.task = agent.task
+                existing.statusRaw = agent.status.rawValue
+                nextAgents.append(existing)
+            } else {
+                nextAgents.append(translate(from: agent))
+            }
+        }
+        
+        for stale in existingByID.values {
+            modelContext.delete(stale)
+        }
+        session.backgroundAgents = nextAgents
     }
 }

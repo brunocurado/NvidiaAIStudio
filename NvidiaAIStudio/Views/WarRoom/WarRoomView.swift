@@ -25,6 +25,8 @@ struct WarRoomView: View {
                     ArchivesView()
                 case .debates:
                     DebateRoomView()
+                case .openClaw:
+                    OpenClawOfficeWebView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -117,6 +119,7 @@ struct WarRoomView: View {
         case .canvas: return appState.orchestrator.runningTasks.count + appState.orchestrator.pendingCount
         case .archives: return appState.orchestrator.unreadDeliverableCount
         case .debates: return 0 // Can implement debate count later
+        case .openClaw: return 0
         }
     }
 }
@@ -127,6 +130,7 @@ enum WarRoomTab: String, CaseIterable, Identifiable {
     case canvas = "Spatial Canvas"
     case archives = "Archives"
     case debates = "Debate Room"
+    case openClaw = "OpenClaw web"
     
     var id: String { rawValue }
     
@@ -135,6 +139,7 @@ enum WarRoomTab: String, CaseIterable, Identifiable {
         case .canvas: return "view.3d"
         case .archives: return "tray.full.fill"
         case .debates: return "bubble.left.and.bubble.right.fill"
+        case .openClaw: return "globe"
         }
     }
 }
@@ -172,7 +177,12 @@ struct WarRoomTabButton: View {
                     ? RoundedRectangle(cornerRadius: 8).fill(GlassTheme.flatFill)
                     : nil
             )
-            .glassEffect(isSelected ? .regular : (isHovered ? .regular : .identity), in: RoundedRectangle(cornerRadius: 8))
+            .glassEffect(
+                isSelected || isHovered
+                    ? .clear.tint(Color.primary.opacity(0.12)).interactive()
+                    : .clear.interactive(),
+                in: RoundedRectangle(cornerRadius: 8)
+            )
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

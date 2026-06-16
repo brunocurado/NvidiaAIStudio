@@ -537,7 +537,12 @@ struct PersonaChip: View {
                             .strokeBorder(isSelected ? Color(hex: persona.accentColorHex).opacity(0.5) : .clear, lineWidth: 1.5)
                     )
             )
-            .glassEffect(isSelected || isHovered ? .regular : .identity, in: RoundedRectangle(cornerRadius: 10))
+            .glassEffect(
+                isSelected || isHovered
+                    ? .clear.tint(Color.primary.opacity(0.08)).interactive()
+                    : .clear.interactive(),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }

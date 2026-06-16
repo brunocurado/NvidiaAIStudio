@@ -5,6 +5,7 @@ import SwiftData
 /// SwiftUI wrapper that owns the WarRoomScene and bridges SwiftData state into SpriteKit.
 struct WarRoomSpriteView: View {
     @Environment(AppState.self) private var appState
+    @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
 
     // Live SwiftData queries — the single source of truth
     @Query(sort: \AgentPersona.name) private var allPersonas: [AgentPersona]
@@ -52,6 +53,11 @@ struct WarRoomSpriteView: View {
             }
             .onAppear { scene.size = geo.size }
             .onChange(of: geo.size) { _, s in scene.size = s }
+            .onChange(of: appThemeID, initial: true) { _, newThemeID in
+                let targetTheme = AppTheme.find(id: newThemeID)
+                let isDark = targetTheme.colorScheme == .dark
+                scene.updateTheme(isDark: isDark)
+            }
             // Sync all agents whenever task or persona list changes
             .onChange(of: activeTasks) { _, tasks in
                 syncAgents(personas: allPersonas, tasks: tasks)

@@ -134,17 +134,18 @@ final class GitHubService {
     
     /// Clones a repository into the given local path using HTTPS + token auth.
     func cloneRepository(repo: GitHubRepo, token: String, destinationPath: String) async throws -> String {
-        // Build authenticated HTTPS clone URL: https://TOKEN@github.com/owner/repo.git
-        let cloneURL = "https://\(token)@github.com/\(repo.fullName).git"
+        let cloneURL = "https://github.com/\(repo.fullName).git"
         let expandedDest = NSString(string: destinationPath).expandingTildeInPath
+        let destination = "\(expandedDest)/\(repo.name)"
         
-        let result = await ShellHelper.run("git clone '\(cloneURL)' '\(expandedDest)/\(repo.name)' 2>&1")
+        let args = Self.authenticatedGitArgs(token: token) + ["clone", cloneURL, destination]
+        let result = await ShellHelper.runExecutable("git", arguments: args)
         
         if result.exitCode != 0 {
-            throw GitHubError.cloneFailed(result.output + result.error)
+            throw GitHubError.cloneFailed(Self.combinedOutput(result))
         }
         
-        return "\(expandedDest)/\(repo.name)"
+        return destination
     }
     
     // MARK: - Commit & Push
@@ -153,27 +154,23 @@ final class GitHubService {
     func commitAndPush(repoPath: String, message: String, token: String) async throws -> String {
         let path = NSString(string: repoPath).expandingTildeInPath
         
-        // Configure git to use the token for this repo (credential via URL)
-        let remote = await ShellHelper.run("cd '\(path)' && git remote get-url origin 2>&1")
-        var remoteURL = remote.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        let add = await ShellHelper.runExecutable("git", arguments: ["add", "-A"], workingDirectory: path)
+        let commit = await ShellHelper.runExecutable("git", arguments: ["commit", "-m", message], workingDirectory: path)
+        let commitOutput = Self.combinedOutput(commit)
         
-        // Inject token into remote URL if not already present
-        if remoteURL.hasPrefix("https://github.com") {
-            remoteURL = remoteURL.replacingOccurrences(of: "https://github.com", with: "https://\(token)@github.com")
-            let _ = await ShellHelper.run("cd '\(path)' && git remote set-url origin '\(remoteURL)' 2>&1")
-        }
-        
-        let add = await ShellHelper.run("cd '\(path)' && git add -A 2>&1")
-        let commit = await ShellHelper.run("cd '\(path)' && git commit -m '\(message.replacingOccurrences(of: "'", with: "\\'"))' 2>&1")
-        
-        if commit.exitCode != 0 && commit.output.contains("nothing to commit") {
+        if commit.exitCode != 0 && commitOutput.contains("nothing to commit") {
             return "ℹ️ Nothing to commit — working tree clean."
         }
         
-        let push = await ShellHelper.run("cd '\(path)' && git push 2>&1")
+        if commit.exitCode != 0 {
+            throw GitHubError.pushFailed(commitOutput)
+        }
+        
+        let pushArgs = Self.authenticatedGitArgs(token: token) + ["push"]
+        let push = await ShellHelper.runExecutable("git", arguments: pushArgs, workingDirectory: path)
         
         if push.exitCode != 0 {
-            throw GitHubError.pushFailed(push.output + push.error)
+            throw GitHubError.pushFailed(Self.combinedOutput(push))
         }
         
         return "✅ Committed and pushed successfully.\n\(add.output)\n\(commit.output)\n\(push.output)"
@@ -183,8 +180,17 @@ final class GitHubService {
     
     func status(repoPath: String) async -> String {
         let path = NSString(string: repoPath).expandingTildeInPath
-        let result = await ShellHelper.run("cd '\(path)' && git status --porcelain 2>&1")
+        let result = await ShellHelper.runExecutable("git", arguments: ["status", "--porcelain"], workingDirectory: path)
         return result.output.isEmpty ? "[No changes]" : result.output
+    }
+    
+    private static func authenticatedGitArgs(token: String) -> [String] {
+        guard !token.isEmpty else { return [] }
+        return ["-c", "http.https://github.com/.extraheader=AUTHORIZATION: bearer \(token)"]
+    }
+    
+    private static func combinedOutput(_ result: ShellHelper.Result) -> String {
+        [result.output, result.error].filter { !$0.isEmpty }.joined(separator: "\n")
     }
     
     // MARK: - Private Helpers

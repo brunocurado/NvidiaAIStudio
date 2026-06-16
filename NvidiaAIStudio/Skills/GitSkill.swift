@@ -32,17 +32,18 @@ struct GitSkill: Skill {
         let extraArgs = SkillArgs.getOptionalString(args, key: "args") ?? ""
         let workDir = SkillArgs.getOptionalString(args, key: "working_directory")
         
-        var cmd = "git \(operation)"
-        if !extraArgs.isEmpty {
-            cmd += " \(extraArgs)"
+        guard !operation.contains(where: { $0.isWhitespace }) else {
+            throw SkillError.invalidArguments("Git operation must be a single subcommand.")
         }
         
-        if let dir = workDir {
-            let expanded = NSString(string: dir).expandingTildeInPath
-            cmd = "cd '\(expanded)' && \(cmd)"
+        let allowedOperations = Set(["status", "add", "commit", "push", "pull", "log", "diff", "branch", "checkout"])
+        guard allowedOperations.contains(operation) else {
+            throw SkillError.permissionDenied("Unsupported git operation: \(operation)")
         }
         
-        let result = await ShellHelper.run(cmd + " 2>&1")
+        let gitArgs = [operation] + Self.splitArguments(extraArgs)
+        let workingDirectory = workDir.map { NSString(string: $0).expandingTildeInPath }
+        let result = await ShellHelper.runExecutable("git", arguments: gitArgs, workingDirectory: workingDirectory)
         
         var output = result.output
         if result.exitCode != 0 && !result.error.isEmpty {
@@ -53,5 +54,46 @@ struct GitSkill: Skill {
         }
         
         return output.isEmpty ? "[No output]" : output
+    }
+    
+    private static func splitArguments(_ raw: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        var quote: Character?
+        var isEscaped = false
+        
+        for char in raw {
+            if isEscaped {
+                current.append(char)
+                isEscaped = false
+                continue
+            }
+            if char == "\\" {
+                isEscaped = true
+                continue
+            }
+            if let activeQuote = quote {
+                if char == activeQuote {
+                    quote = nil
+                } else {
+                    current.append(char)
+                }
+                continue
+            }
+            if char == "\"" || char == "'" {
+                quote = char
+            } else if char.isWhitespace {
+                if !current.isEmpty {
+                    result.append(current)
+                    current = ""
+                }
+            } else {
+                current.append(char)
+            }
+        }
+        if !current.isEmpty {
+            result.append(current)
+        }
+        return result
     }
 }

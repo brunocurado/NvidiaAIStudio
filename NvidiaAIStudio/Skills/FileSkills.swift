@@ -211,19 +211,19 @@ struct SearchFilesSkill: Skill {
         let filePattern = SkillArgs.getOptionalString(args, key: "file_pattern")
         let expandedPath = NSString(string: path).expandingTildeInPath
         
-        var cmd = "grep -rnI --color=never"
+        var grepArgs = ["-rnI", "--color=never"]
         if let fp = filePattern {
-            cmd += " --include='\(fp)'"
+            grepArgs.append("--include=\(fp)")
         }
-        cmd += " '\(pattern.replacingOccurrences(of: "'", with: "'\\''"))' '\(expandedPath)'"
-        cmd += " 2>/dev/null | head -50"
+        grepArgs.append(pattern)
+        grepArgs.append(expandedPath)
         
-        let result = await ShellHelper.run(cmd)
+        let result = await ShellHelper.runExecutable("grep", arguments: grepArgs)
         
         if result.output.isEmpty {
             return "No matches found for '\(pattern)' in \(path)"
         }
-        return result.output
+        return result.output.components(separatedBy: "\n").prefix(50).joined(separator: "\n")
     }
 }
 
@@ -268,23 +268,25 @@ struct RunCommandSkill: Skill {
             }
         }
         
-        var cmd = command
+        var workingDirectory: String? = nil
         if let dir = workDir {
-            let expanded = NSString(string: dir).expandingTildeInPath
-            cmd = "cd '\(expanded)' && \(command)"
+            workingDirectory = NSString(string: dir).expandingTildeInPath
         }
         
         if runInBackground {
-            let finalCmd = cmd
+            let finalCmd: String
+            if let workingDirectory {
+                finalCmd = "cd \(Self.shellQuote(workingDirectory)) && \(command)"
+            } else {
+                finalCmd = command
+            }
             await MainActor.run {
                 PTYManager.shared.write("\(finalCmd)\n")
             }
             return "Command '\(command)' dispatched to the visual PTY terminal successfully. It is now running in the background."
         }
         
-        cmd = "\(cmd) 2>&1"
-        
-        let result = await ShellHelper.run(cmd)
+        let result = await ShellHelper.run("\(command) 2>&1", workingDirectory: workingDirectory)
         
         var output = ""
         if !result.output.isEmpty {
@@ -303,5 +305,9 @@ struct RunCommandSkill: Skill {
         }
         
         return output.isEmpty ? "[No output]" : output
+    }
+    
+    private static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 }

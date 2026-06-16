@@ -104,44 +104,50 @@ struct GlassCanvasBackdrop: View {
 extension View {
     
     /// Sidebar rail — glass background for the sidebar panel.
+    /// Tinted with `GlassTheme.sidebarTint` so it adapts between light and dark mode.
     func macSidebarRail(in shape: RoundedRectangle = RoundedRectangle(cornerRadius: 26, style: .continuous)) -> some View {
-        self.glassEffect(.clear, in: shape)
+        self.glassEffect(.clear.tint(GlassTheme.sidebarTint), in: shape)
     }
-    
+
     /// Navigation glass — toolbars, navigation surfaces.
+    /// Tinted with `GlassTheme.panelTint` so it adapts between light and dark mode.
     func macNavigationGlass(in shape: some Shape = RoundedRectangle(cornerRadius: 20, style: .continuous)) -> some View {
-        self.glassEffect(.clear, in: shape)
+        self.glassEffect(.clear.tint(GlassTheme.panelTint), in: shape)
     }
-    
+
     /// Content board — cards, lists, tables. The workhorse modifier.
     /// Multiple shape overloads for flexibility.
+    /// Tinted with `GlassTheme.panelTint` so it adapts between light and dark mode.
     func macContentBoard(cornerRadius: CGFloat = 16) -> some View {
         self.macContentBoard(in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
-    
+
     func macContentBoard(in shape: RoundedRectangle) -> some View {
-        self.glassEffect(.clear, in: shape)
+        self.glassEffect(.clear.tint(GlassTheme.panelTint), in: shape)
     }
-    
+
     func macContentBoard(in shape: Capsule) -> some View {
-        self.glassEffect(.clear.interactive(), in: Capsule())
+        self.glassEffect(.clear.tint(GlassTheme.panelTint).interactive(), in: Capsule())
     }
-    
+
     func macContentBoard(in shape: Circle) -> some View {
-        self.glassEffect(.clear.interactive(), in: Circle())
+        self.glassEffect(.clear.tint(GlassTheme.panelTint).interactive(), in: Circle())
     }
-    
+
     /// Glass tile — standalone widget tiles with larger corner radius.
+    /// Tinted with `GlassTheme.glassTileTint` so it adapts between light and dark mode.
     func macGlassTile(cornerRadius: CGFloat = 24) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return self.glassEffect(.clear, in: shape)
+        return self.glassEffect(.clear.tint(GlassTheme.glassTileTint), in: shape)
     }
-    
+
     /// Modal glass — for ZStack overlay popovers (NOT .sheet!).
     /// `.sheet` on macOS opens a separate NSWindow with opaque backdrop that kills glass.
+    /// Tinted with `GlassTheme.glassTintStrong` (slightly more emphasis than a regular tile)
+    /// so modals stand out and adapt between light and dark mode.
     func macModalGlass(cornerRadius: CGFloat = 32) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return self.glassEffect(.clear.interactive(), in: shape)
+        return self.glassEffect(.clear.tint(GlassTheme.glassTintStrong).interactive(), in: shape)
             .shadow(color: .black.opacity(0.28), radius: 40, y: 20)
     }
     

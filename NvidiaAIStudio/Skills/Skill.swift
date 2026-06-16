@@ -85,31 +85,36 @@ final class SkillRegistry {
         guard !workspacePath.isEmpty else {
             throw SkillError.permissionDenied("Sandboxed mode requires an active workspace.")
         }
-        let workspace = (workspacePath as NSString).expandingTildeInPath
+        let workspace = Self.canonicalPath((workspacePath as NSString).expandingTildeInPath)
         var args = try SkillArgs.parse(arguments)
+        if skillName.hasPrefix("mcp_") {
+            throw SkillError.permissionDenied("\u{1F512} Sandboxed: MCP tools are disabled until they can be workspace-scoped.")
+        }
         switch skillName {
         case "read_file", "write_file", "list_directory", "search_files":
             guard let rawPath = args["path"] as? String else { break }
-            let expanded = (rawPath as NSString).expandingTildeInPath
-            guard expanded.hasPrefix(workspace) else {
+            let expanded = Self.canonicalPath((rawPath as NSString).expandingTildeInPath)
+            guard Self.path(expanded, isInside: workspace) else {
                 throw SkillError.permissionDenied("\u{1F512} Sandboxed: '\(rawPath)' is outside the workspace.")
             }
         case "run_command":
+            throw SkillError.permissionDenied("\u{1F512} Sandboxed: run_command is disabled because shell commands cannot be reliably contained to a workspace.")
+        case "ssh_command":
+            throw SkillError.permissionDenied("\u{1F512} Sandboxed: ssh_command is disabled.")
+        case "git":
             args["working_directory"] = workspace
             return (try? String(data: JSONSerialization.data(withJSONObject: args), encoding: .utf8)) ?? arguments
-        case "git":
-            if let rawDir = args["working_directory"] as? String {
-                let expanded = (rawDir as NSString).expandingTildeInPath
-                if !expanded.hasPrefix(workspace) {
-                    throw SkillError.permissionDenied("\u{1F512} Sandboxed: git directory outside workspace.")
-                }
-            } else {
-                args["working_directory"] = workspace
-                return (try? String(data: JSONSerialization.data(withJSONObject: args), encoding: .utf8)) ?? arguments
-            }
         default: break
         }
         return arguments
+    }
+    
+    private static func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
+    }
+    
+    private static func path(_ path: String, isInside workspace: String) -> Bool {
+        path == workspace || path.hasPrefix(workspace.hasSuffix("/") ? workspace : workspace + "/")
     }
 }
 

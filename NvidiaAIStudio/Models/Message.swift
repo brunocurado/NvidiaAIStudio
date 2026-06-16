@@ -101,7 +101,7 @@ struct Message: Identifiable, Codable, Equatable {
         }
     }
     
-    func toAPIDict() -> [String: Any] {
+    func contentIncludingTextAttachments() -> String {
         var processedContent = content
         
         // --- V2 Universal Dropzone Parsing ---
@@ -128,6 +128,11 @@ struct Message: Identifiable, Codable, Equatable {
             }
         }
         
+        return processedContent
+    }
+    
+    func toAPIDict() -> [String: Any] {
+        let processedContent = contentIncludingTextAttachments()
         var dict: [String: Any] = ["role": role.rawValue, "content": processedContent]
         let imageAttachments = attachments.filter { $0.mimeType.starts(with: "image/") }
         

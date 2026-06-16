@@ -3,53 +3,135 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @AppStorage("appThemeID") private var appThemeID: String = "liquid_glass_dark"
+    @State private var selectedTab: SettingsTab = .general
     @State private var window: NSWindow?
     
     private var theme: AppTheme { AppTheme.find(id: appThemeID) }
     
     var body: some View {
         ZStack {
-            // Subtly colored overlay matching the selected theme.
-            // Using contentShape ensures the empty background regions receive click/drag hit testing.
-            theme.backgroundTint.ignoresSafeArea()
-                .contentShape(Rectangle())
-            
-            TabView {
-                APIKeysSettingsView()
-                    .tabItem { Label("API Keys", systemImage: "key.fill") }
-                ModelsSettingsView()
-                    .tabItem { Label("Models", systemImage: "cpu.fill") }
-                GeneralSettingsView()
-                    .tabItem { Label("General", systemImage: "gearshape.fill") }
-                GitHubSettingsView()
-                    .tabItem { Label("GitHub", systemImage: "chevron.left.forwardslash.chevron.right") }
-                MCPSettingsView()
-                    .tabItem { Label("MCP", systemImage: "puzzlepiece.extension.fill") }
-                SSHSettingsView()
-                    .tabItem { Label("SSH", systemImage: "terminal.fill") }
+            SettingsClearGlassBackdrop()
+
+            VStack(spacing: 0) {
+                SettingsTabBar(selectedTab: $selectedTab)
+                    .padding(.top, 20)
+                    .padding(.bottom, 12)
+
+                selectedContent
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+            .macModalGlass(cornerRadius: 28)
         }
         .frame(width: 620, height: 560)
+        .contentShape(Rectangle())
         .background(WindowAccessor(window: $window))
         .onChange(of: window) { _, w in
             guard let w = w else { return }
-            AppWindowStyler.applyToSettings(to: w)
+            AppWindowStyler.applyToSettings(to: w, colorScheme: theme.colorScheme)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                AppWindowStyler.applyToSettings(to: w)
+                AppWindowStyler.applyToSettings(to: w, colorScheme: theme.colorScheme)
             }
         }
         .onChange(of: theme) { _, newTheme in
             guard let w = window else { return }
-            AppWindowStyler.applyToSettings(to: w)
+            AppWindowStyler.applyToSettings(to: w, colorScheme: newTheme.colorScheme)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                AppWindowStyler.applyToSettings(to: w)
+                AppWindowStyler.applyToSettings(to: w, colorScheme: newTheme.colorScheme)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                AppWindowStyler.applyToSettings(to: w)
+                AppWindowStyler.applyToSettings(to: w, colorScheme: newTheme.colorScheme)
             }
         }
         // Force the app to re-evaluate the primary text color against the environment to fix macOS caching bug
         .foregroundStyle(.primary)
+        .preferredColorScheme(theme.colorScheme)
+    }
+
+    @ViewBuilder
+    private var selectedContent: some View {
+        switch selectedTab {
+        case .apiKeys:
+            APIKeysSettingsView()
+        case .models:
+            ModelsSettingsView()
+        case .general:
+            GeneralSettingsView()
+        case .gitHub:
+            GitHubSettingsView()
+        case .mcp:
+            MCPSettingsView()
+        case .ssh:
+            SSHSettingsView()
+        }
+    }
+}
+
+private struct SettingsClearGlassBackdrop: View {
+    var body: some View {
+        Color.clear
+            .glassEffect(.clear, in: Rectangle())
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+    }
+}
+
+private struct SettingsTabBar: View {
+    @Binding var selectedTab: SettingsTab
+
+    var body: some View {
+        HStack(spacing: 16) {
+            ForEach(SettingsTab.allCases) { tab in
+                Button {
+                    selectedTab = tab
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 23, weight: .semibold))
+                        Text(tab.title)
+                            .font(.system(size: 12.5))
+                    }
+                    .foregroundStyle(selectedTab == tab ? Color.accentColor : .primary.opacity(0.72))
+                    .frame(width: 62, height: 58)
+                    .contentShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .macControlPill(isSelected: selectedTab == tab, cornerRadius: 11)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case apiKeys
+    case models
+    case general
+    case gitHub
+    case mcp
+    case ssh
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .apiKeys: return "API Keys"
+        case .models: return "Models"
+        case .general: return "General"
+        case .gitHub: return "GitHub"
+        case .mcp: return "MCP"
+        case .ssh: return "SSH"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .apiKeys: return "key.fill"
+        case .models: return "cpu.fill"
+        case .general: return "gearshape.fill"
+        case .gitHub: return "chevron.left.forwardslash.chevron.right"
+        case .mcp: return "puzzlepiece.extension.fill"
+        case .ssh: return "terminal.fill"
+        }
     }
 }
 
@@ -60,7 +142,9 @@ private struct WindowAccessor: NSViewRepresentable {
         DispatchQueue.main.async { self.window = view.window }
         return view
     }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { self.window = nsView.window }
+    }
 }
 
 // MARK: - API Keys Tab
@@ -153,11 +237,27 @@ struct APIKeysSettingsView: View {
     }
 }
 
+struct IdentifiableString: Identifiable {
+    let id: String
+}
+
 // MARK: - Models Tab
 
 struct ModelsSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var localModels: [AIModel] = []
+    @State private var editingModelID: String? = nil
+    @State private var customContextInput: String = ""
+
+    private func updateModelContextWindow(id: String, newContext: Int) {
+        if let idx = appState.availableModels.firstIndex(where: { $0.id == id }) {
+            appState.availableModels[idx].contextWindow = newContext
+            appState.saveModelPreferences()
+        }
+        if let idx = localModels.firstIndex(where: { $0.id == id }) {
+            localModels[idx].contextWindow = newContext
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -182,7 +282,45 @@ struct ModelsSettingsView: View {
                             if model.supportsVision {
                                 Image(systemName: "eye.fill").font(.caption2).foregroundStyle(.purple).help("Supports vision")
                             }
-                            Text("\(model.contextWindow / 1000)K").font(.caption).foregroundStyle(.secondary)
+                            
+                            Menu {
+                                Button("8K") { updateModelContextWindow(id: model.id, newContext: 8_192) }
+                                Button("16K") { updateModelContextWindow(id: model.id, newContext: 16_384) }
+                                Button("32K") { updateModelContextWindow(id: model.id, newContext: 32_768) }
+                                Button("128K") { updateModelContextWindow(id: model.id, newContext: 128_000) }
+                                Button("256K") { updateModelContextWindow(id: model.id, newContext: 262_144) }
+                                Button("1M") { updateModelContextWindow(id: model.id, newContext: 1_000_000) }
+                                Button("2M") { updateModelContextWindow(id: model.id, newContext: 2_000_000) }
+                                
+                                Divider()
+                                
+                                Button("Personalizado...") {
+                                    customContextInput = "\(model.contextWindow / 1000)"
+                                    editingModelID = model.id
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    let kTokens: String = {
+                                        if model.contextWindow >= 1_000_000 {
+                                            let millions = Double(model.contextWindow) / 1_000_000.0
+                                            let formatted = String(format: "%.1f", millions)
+                                            return formatted.hasSuffix(".0") ? "\(model.contextWindow / 1_000_000)M" : "\(formatted)M"
+                                        } else {
+                                            return "\(model.contextWindow / 1000)K"
+                                        }
+                                    }()
+                                    Text(kTokens)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Image(systemName: "pencil")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .opacity(0.6)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .menuStyle(.borderlessButton)
+                            .fixedSize()
                         }
                         .padding(.vertical, 2)
                     }
@@ -192,6 +330,45 @@ struct ModelsSettingsView: View {
         }
         .padding()
         .onAppear { localModels = appState.availableModels }
+        .popover(item: Binding(
+            get: { editingModelID.map { IdentifiableString(id: $0) } },
+            set: { editingModelID = $0?.id }
+        )) { ident in
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Editar Janela de Contexto")
+                    .font(.headline)
+                
+                Text("Introduza o valor em milhares de tokens (ex: 128 para 128K, 1000 para 1M):")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 250, alignment: .leading)
+                
+                HStack {
+                    TextField("Ex: 128", text: $customContextInput)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 120)
+                    Text("K Tokens")
+                        .font(.body)
+                }
+                
+                HStack {
+                    Button("Cancelar") {
+                        editingModelID = nil
+                    }
+                    Spacer()
+                    Button("Guardar") {
+                        let cleanInput = customContextInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if let kValue = Int(cleanInput) {
+                            updateModelContextWindow(id: ident.id, newContext: kValue * 1000)
+                        }
+                        editingModelID = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding()
+            .frame(width: 280)
+        }
     }
 }
 
@@ -202,6 +379,7 @@ struct GeneralSettingsView: View {
     @AppStorage("glassOpacity") private var glassOpacity: Double = 0.25
     @AppStorage("glassBlur") private var glassBlur: Double = 20.0
     @AppStorage("visionDelegateModelID") private var visionDelegateModelID = "nvidia/nemotron-nano-12b-v2-vl"
+    @AppStorage("selectedImageModelID") private var selectedImageModelID = "flux.2-klein-4b"
     @Environment(AppState.self) private var appState
     private let columns = [GridItem(.adaptive(minimum: 110, maximum: 140), spacing: 8)]
 
@@ -241,6 +419,18 @@ struct GeneralSettingsView: View {
                     }
                 }
                 .frame(width: 350)
+                
+                Divider()
+                Text("Geração de Imagem").font(.headline)
+                Text("Selecione o modelo predefinido utilizado pela skill generate_image.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Picker("Modelo de Imagem", selection: $selectedImageModelID) {
+                    ForEach(ImageModel.availableImageModels) { model in
+                        Text(model.name).tag(model.id)
+                    }
+                }
+                .frame(width: 350)
+                
                 Spacer()
             }
             .padding()
@@ -649,8 +839,12 @@ struct SSHSettingsView: View {
         isTesting = true; testResult = ""
         let expandedKey = NSString(string: sshKeyPath).expandingTildeInPath
         Task {
-            let cmd = "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i '\(expandedKey)' -p \(sshPort) \(sshUser)@\(sshHost) 'echo connected' 2>&1"
-            let result = await ShellHelper.run(cmd)
+            var args = ["-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=5"]
+            if !expandedKey.isEmpty {
+                args.append(contentsOf: ["-i", expandedKey])
+            }
+            args.append(contentsOf: ["-p", "\(sshPort)", "\(sshUser)@\(sshHost)", "echo connected"])
+            let result = await ShellHelper.runExecutable("ssh", arguments: args)
             await MainActor.run {
                 isTesting = false
                 testResult = result.output.contains("connected")
