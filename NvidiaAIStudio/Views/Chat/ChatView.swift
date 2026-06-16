@@ -6,9 +6,9 @@ struct ChatView: View {
     @State private var viewModel = ChatViewModel()
     @State private var showExportPanel = false
     @State private var showNewAgentSheet = false
-    @State private var visibleMessageCount = 20
+    @State private var visibleMessageCount = 100
     @State private var isUserNearBottom = true
-    
+
     var body: some View {
         VStack(spacing: 0) {
             if let session = appState.activeSession {
@@ -17,18 +17,18 @@ struct ChatView: View {
                     ScrollView {
                         VStack(spacing: 0) {
                             // "Load earlier messages" button
-                            let totalMessages = session.messages.count
-                            
+                            let totalMessages = session.messages.filter { $0.role == .user || $0.role == .assistant }.count
+
                             if totalMessages > visibleMessageCount {
                                 Button {
                                     withAnimation(.spring(duration: 0.3)) {
-                                        visibleMessageCount += 20
+                                        visibleMessageCount += 50
                                     }
                                 } label: {
                                     HStack(spacing: 6) {
                                         Image(systemName: "arrow.up.circle")
                                             .font(.caption)
-                                        Text("Load \(min(20, totalMessages - visibleMessageCount)) earlier messages")
+                                        Text("Load \(min(50, totalMessages - visibleMessageCount)) earlier messages")
                                             .font(.caption)
                                             .fontWeight(.medium)
                                     }
@@ -41,7 +41,7 @@ struct ChatView: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.bottom, 8)
                             }
-                            
+
                             // LazyVStack: only renders on-screen messages.
                             // The old VStack caused O(N) Markdown re-parses per frame → 99% CPU.
                             LazyVStack(spacing: 16) {
@@ -53,7 +53,7 @@ struct ChatView: View {
                                 }
                             }
                             .animation(.none, value: session.messages.count)
-                            
+
                             // Bottom anchor — OUTSIDE LazyVStack so always rendered
                             // Also serves as a visibility sentinel: when on-screen, user is "near bottom"
                             Color.clear
@@ -82,7 +82,7 @@ struct ChatView: View {
                         scrollToBottom(proxy, animated: true)
                     }
                     .onChange(of: session.id) {
-                        visibleMessageCount = 20  // Reset on thread switch
+                        visibleMessageCount = 100  // Reset on thread switch
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             scrollToBottom(proxy, animated: true)
                         }
@@ -172,13 +172,25 @@ struct ChatView: View {
     }
     
     /// Scroll to bottom — uses instant scroll during active streaming to prevent layout glitches.
+    /// Also retries after a short delay to handle cases where the content height changes
+    /// asynchronously (e.g., when reasoning expands or tool results arrive).
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let scrollAction = {
+            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+        }
+
         if animated {
             withAnimation(.easeOut(duration: 0.15)) {
-                proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                scrollAction()
             }
         } else {
-            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+            scrollAction()
+        }
+
+        // Retry after a short delay to handle async layout changes
+        // (e.g., reasoning expansion, tool result rendering)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            scrollAction()
         }
     }
 
