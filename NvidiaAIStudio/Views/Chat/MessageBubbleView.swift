@@ -576,30 +576,32 @@ struct ReasoningView: View {
             .buttonStyle(.plain)
             
             if isExpanded || isLive {
-                ScrollView {
-                    // CPU optimization: Don't render huge character counts or text selection while streaming
-                    let displayContent = isLive && content.count > 800
-                        ? "... " + String(content.suffix(800)) 
-                        : content
-                    
-                    if isLive {
-                        Text(displayContent)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.disabled)
-                    } else {
-                        Text(displayContent)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
+                // FIX: Use a regular VStack instead of nested ScrollView.
+                // Nested ScrollViews inside the main chat ScrollView cause layout
+                // issues — the outer scroll can collapse and messages disappear.
+                // We limit the visible content with a character cap instead.
+                let displayContent = isLive && content.count > 800
+                    ? "... " + String(content.suffix(800))
+                    : content
+
+                let textView = Text(displayContent)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(isLive ? 6 : nil)
+
+                if isLive {
+                    textView
+                        .textSelection(.disabled)
+                        .padding(10)
+                        .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                } else {
+                    textView
+                        .textSelection(.enabled)
+                        .padding(10)
+                        .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                 }
-                // Fixed height during streaming prevents layout jumping
-                .frame(height: isLive ? 100 : min(max(CGFloat(content.count) / 4, 60), 300))
-                .padding(10)
-                .background(.orange.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .padding(.horizontal, 14)
