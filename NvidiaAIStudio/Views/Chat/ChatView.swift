@@ -19,7 +19,15 @@ struct ChatView: View {
                             // to ensure all messages are always rendered.
                             // LazyVStack was causing messages to disappear during
                             // thinking/tool-calling mode.
-                            let displayMessages = session.messages.filter { $0.role == .user || $0.role == .assistant }
+                            //
+                            // FIX (v3.1.6): Include tool messages that have image attachments
+                            // (e.g., from generate_image tool). Without this, generated images
+                            // were silently filtered out and never displayed.
+                            let displayMessages = session.messages.filter { msg in
+                                if msg.role == .user || msg.role == .assistant { return true }
+                                if msg.role == .tool && !msg.attachments.isEmpty { return true }
+                                return false
+                            }
 
                             ForEach(displayMessages, id: \.id) { message in
                                 MessageBubbleView(message: message)
