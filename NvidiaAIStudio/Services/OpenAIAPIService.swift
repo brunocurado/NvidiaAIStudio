@@ -138,6 +138,8 @@ final class OpenAIAPIService: AIProvider {
         if isReasoningModel && reasoningLevel != .off {
             let effort: String
             switch reasoningLevel {
+            case .max:    effort = "high"
+            case .xhigh:  effort = "high"
             case .high:   effort = "high"
             case .medium: effort = "medium"
             case .low:    effort = "low"
@@ -149,10 +151,12 @@ final class OpenAIAPIService: AIProvider {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
     }
-    
+
     private func maxOutputTokens(reasoningLevel: ReasoningLevel) -> Int {
         switch reasoningLevel {
-        case .high: return 8192
+        case .max:    return 12288
+        case .xhigh:  return 10240
+        case .high:   return 8192
         case .medium: return 6144
         case .low, .off: return 4096
         }

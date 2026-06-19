@@ -119,12 +119,20 @@ final class AnthropicAPIService: AIProvider {
         if model.supportsThinking && reasoningLevel != .off {
             let budget: Int
             switch reasoningLevel {
+            case .max:    budget = 16384
+            case .xhigh:  budget = 8192
             case .high:   budget = 4096
             case .medium: budget = 2048
             case .low:    budget = 1024
             case .off:    budget = 0
             }
             body["thinking"] = ["type": "enabled", "budget_tokens": budget]
+        }
+
+        // Effort control (Claude Opus 4.7+): output_config.effort
+        // Controls the model's overall reasoning effort level, separate from budget_tokens.
+        if let effort = reasoningLevel.anthropicEffort {
+            body["output_config"] = ["effort": effort]
         }
 
         // Tools
@@ -223,10 +231,13 @@ final class AnthropicAPIService: AIProvider {
     }
     
     private func maxOutputTokens(reasoningLevel: ReasoningLevel) -> Int {
+        let base = PromptConfig.default.defaultMaxOutputTokens
         switch reasoningLevel {
-        case .high: return PromptConfig.default.defaultMaxOutputTokens
-        case .medium: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.75)
-        case .low, .off: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.5)
+        case .max:    return Int(Double(base) * 1.5)
+        case .xhigh:  return Int(Double(base) * 1.25)
+        case .high:   return base
+        case .medium: return Int(Double(base) * 0.75)
+        case .low, .off: return Int(Double(base) * 0.5)
         }
     }
 

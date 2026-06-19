@@ -199,7 +199,7 @@ final class NVIDIAAPIService: AIProvider {
         if usesReasoningEffort(modelID: model.id) {
             // Mistral-style: only supports "high" and "none"
             switch reasoningLevel {
-            case .high, .medium: body["reasoning_effort"] = "high"
+            case .max, .xhigh, .high, .medium: body["reasoning_effort"] = "high"
             case .low, .off: break // Mistral: omit param entirely for no reasoning
             }
         } else if supportsThinking(modelID: model.id) && reasoningLevel != .off {
@@ -212,6 +212,8 @@ final class NVIDIAAPIService: AIProvider {
                 // DeepSeek V4 reasoning uses chat_template_kwargs based on API docs
                 let thinkingValue: Any
                 switch reasoningLevel {
+                case .max: thinkingValue = "max"
+                case .xhigh: thinkingValue = "max"
                 case .high: thinkingValue = "max"
                 case .medium: thinkingValue = "high"
                 case .low: thinkingValue = false
@@ -222,6 +224,8 @@ final class NVIDIAAPIService: AIProvider {
                 // Qwen/DeepSeek-style: uses reasoning object with budget
                 let budget: Int
                 switch reasoningLevel {
+                case .max: budget = 16384
+                case .xhigh: budget = 8192
                 case .high: budget = 4096
                 case .medium: budget = 2048
                 case .low: budget = 512
@@ -240,23 +244,32 @@ final class NVIDIAAPIService: AIProvider {
 
         if contextWindow >= 1_000_000 {
             // 1M+ context models (MiniMax M3, DeepSeek V4, GPT-4.1): allow larger outputs
+            let base = PromptConfig.default.largeContextMaxOutputTokens
             switch reasoningLevel {
-            case .high: return PromptConfig.default.largeContextMaxOutputTokens
-            case .medium: return Int(Double(PromptConfig.default.largeContextMaxOutputTokens) * 0.75)
-            case .low, .off: return Int(Double(PromptConfig.default.largeContextMaxOutputTokens) * 0.5)
+            case .max: return Int(Double(base) * 1.5)
+            case .xhigh: return Int(Double(base) * 1.25)
+            case .high: return base
+            case .medium: return Int(Double(base) * 0.75)
+            case .low, .off: return Int(Double(base) * 0.5)
             }
         } else if contextWindow <= 32_768 {
             // Small context models: conservative output
+            let base = PromptConfig.default.defaultMaxOutputTokens
             switch reasoningLevel {
-            case .high: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.5)
-            case .medium, .low, .off: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.25)
+            case .max: return Int(Double(base) * 0.75)
+            case .xhigh: return Int(Double(base) * 0.6)
+            case .high: return Int(Double(base) * 0.5)
+            case .medium, .low, .off: return Int(Double(base) * 0.25)
             }
         } else {
             // Standard 128K-262K models
+            let base = PromptConfig.default.defaultMaxOutputTokens
             switch reasoningLevel {
-            case .high: return PromptConfig.default.defaultMaxOutputTokens
-            case .medium: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.75)
-            case .low, .off: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.5)
+            case .max: return Int(Double(base) * 1.5)
+            case .xhigh: return Int(Double(base) * 1.25)
+            case .high: return base
+            case .medium: return Int(Double(base) * 0.75)
+            case .low, .off: return Int(Double(base) * 0.5)
             }
         }
     }

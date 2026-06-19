@@ -622,7 +622,7 @@ struct ContextIndicatorView: View {
             ZStack {
                 Circle()
                     .stroke(Color.primary.opacity(0.1), lineWidth: 2.5)
-                
+
                 Circle()
                     .trim(from: 0, to: usage)
                     .stroke(ringColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
@@ -630,6 +630,7 @@ struct ContextIndicatorView: View {
                     .animation(.easeInOut(duration: 0.3), value: usage)
             }
             .frame(width: 20, height: 20)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help("Context: \(Int(usage * 100))%")

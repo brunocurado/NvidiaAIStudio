@@ -642,17 +642,34 @@ enum RightPanelMode: String, CaseIterable {
 }
 
 enum ReasoningLevel: String, CaseIterable {
+    case max = "Max"
+    case xhigh = "X-High"
     case high = "High"
     case medium = "Medium"
     case low = "Low"
     case off = "Off"
-    
+
     var icon: String {
         switch self {
+        case .max: return "brain.head.profile.fill"
+        case .xhigh: return "brain.head.profile.fill"
         case .high: return "brain.head.profile.fill"
         case .medium: return "brain.head.profile"
         case .low: return "brain"
         case .off: return "brain.head.profile"
+        }
+    }
+
+    /// Maps to Anthropic API `output_config.effort` parameter.
+    /// Returns nil for `.off` so the parameter is omitted entirely.
+    var anthropicEffort: String? {
+        switch self {
+        case .max: return "max"
+        case .xhigh: return "xhigh"
+        case .high: return "high"
+        case .medium: return "medium"
+        case .low: return "low"
+        case .off: return nil
         }
     }
 }
