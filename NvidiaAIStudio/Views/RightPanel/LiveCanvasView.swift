@@ -107,7 +107,7 @@ struct WebViewRepresentable: NSViewRepresentable {
             let ignoreList = ["favicon.ico", "sockjs-node", "webpack-internal"]
             if ignoreList.contains(where: { errorMsg.contains($0) }) { return }
             
-            print("🛑 [Live Canvas] Captured JS Error: \(trace)")
+            AppLog.app.error("🛑 [Live Canvas] Captured JS Error: \(trace, privacy: .public)")
             
             // Post notification for the Exterminator Loop
             DispatchQueue.main.async {

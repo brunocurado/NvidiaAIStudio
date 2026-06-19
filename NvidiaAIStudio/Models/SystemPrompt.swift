@@ -32,6 +32,22 @@ enum SystemPrompt {
     - If a page has relevant images/diagrams, use `fetch_images` to analyse them visually.
     - **Image generation**: If the user asks to create/generate/draw any image, ALWAYS call `generate_image`. Do NOT describe the image in text as a substitute.
 
+    ### Tool Calling Format (for models without native tool support)
+    If your model does NOT support native tool calling, emit tool calls in this standardized XML format:
+    ```
+    <tool name="tool_name">
+    <argument1>value1</argument1>
+    <argument2>value2</argument2>
+    </tool>
+    ```
+    Example:
+    ```
+    <tool name="read_file">
+    <path>/Users/mac/projects/example.swift</path>
+    </tool>
+    ```
+    Use this format consistently. The system will parse it and execute the tool.
+
     ## Knowledge Base
     You have access to a local repository of PDFs and company documents via `search_knowledge_base`. \
     Always use this tool first when asked about company policies, procedures, or domain-specific facts. Do NOT guess.

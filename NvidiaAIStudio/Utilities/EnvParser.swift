@@ -62,18 +62,18 @@ enum EnvParser {
         for path in searchPaths {
             let env = parse(at: path)
             if let key = env["NVIDIA_NIM_API_KEY"], !key.isEmpty {
-                print("[EnvParser] Found API key at: \(path.path)")
+                AppLog.app.info("[EnvParser] Found API key at: \(path.path, privacy: .public)")
                 return key
             }
         }
         
         // Fallback: environment variable
         if let envKey = ProcessInfo.processInfo.environment["NVIDIA_NIM_API_KEY"], !envKey.isEmpty {
-            print("[EnvParser] Found API key from environment variable")
+            AppLog.app.info("[EnvParser] Found API key from environment variable")
             return envKey
         }
         
-        print("[EnvParser] ⚠️ No NVIDIA API key found in any location")
+        AppLog.app.warning("[EnvParser] ⚠️ No NVIDIA API key found in any location")
         return nil
     }
 }

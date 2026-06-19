@@ -237,26 +237,26 @@ final class NVIDIAAPIService: AIProvider {
     
     private func maxOutputTokens(reasoningLevel: ReasoningLevel, model: AIModel? = nil) -> Int {
         let contextWindow = model?.contextWindow ?? 128_000
-        
+
         if contextWindow >= 1_000_000 {
             // 1M+ context models (MiniMax M3, DeepSeek V4, GPT-4.1): allow larger outputs
             switch reasoningLevel {
-            case .high: return 16_384
-            case .medium: return 12_288
-            case .low, .off: return 8_192
+            case .high: return PromptConfig.default.largeContextMaxOutputTokens
+            case .medium: return Int(Double(PromptConfig.default.largeContextMaxOutputTokens) * 0.75)
+            case .low, .off: return Int(Double(PromptConfig.default.largeContextMaxOutputTokens) * 0.5)
             }
         } else if contextWindow <= 32_768 {
             // Small context models: conservative output
             switch reasoningLevel {
-            case .high: return 4_096
-            case .medium, .low, .off: return 2_048
+            case .high: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.5)
+            case .medium, .low, .off: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.25)
             }
         } else {
             // Standard 128K-262K models
             switch reasoningLevel {
-            case .high: return 8_192
-            case .medium: return 6_144
-            case .low, .off: return 4_096
+            case .high: return PromptConfig.default.defaultMaxOutputTokens
+            case .medium: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.75)
+            case .low, .off: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.5)
             }
         }
     }

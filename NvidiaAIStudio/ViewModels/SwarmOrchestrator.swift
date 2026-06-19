@@ -88,7 +88,7 @@ final class SwarmOrchestrator {
         
         guard let activeTask = activeTasks.first else { return }
 
-        print("🛑 Orchestrator intercepting Visual Error: Injecting to task \(activeTask)")
+        AppLog.swarm.notice("🛑 Orchestrator intercepting Visual Error: Injecting to task \(activeTask, privacy: .public)")
 
         // Inject as a system directive directly (thread-safe via MainActor)
         Task { @MainActor in
@@ -307,8 +307,8 @@ final class SwarmOrchestrator {
             }
         }
         
-        let maxIterations = isDebate ? task.maxRounds * max(debateParticipants.count, 1) : 25
-        var selfHealingRetries = 3
+        let maxIterations = isDebate ? task.maxRounds * max(debateParticipants.count, 1) : PromptConfig.default.maxSwarmIterations
+        var selfHealingRetries = PromptConfig.default.selfHealingRetries
         var debateOpened = false   // tracks if moderator has already injected the opening
         
         for iteration in 0..<maxIterations {
@@ -721,11 +721,11 @@ final class SwarmOrchestrator {
                         break
                     } else {
                         lastError = "Invalid JSON schema"
-                        print("⚠️ COO attempt \(attempt): \(lastError)")
+                        AppLog.swarm.warning("⚠️ COO attempt \(attempt): \(lastError, privacy: .public)")
                     }
                 } catch {
                     lastError = error.localizedDescription
-                    print("⚠️ COO attempt \(attempt) error: \(lastError)")
+                    AppLog.swarm.error("⚠️ COO attempt \(attempt) error: \(lastError, privacy: .public)")
                 }
             }
 
@@ -841,7 +841,7 @@ Strict mandate: \(desc)
         do {
             try context.save()
         } catch {
-            print("⚠️ Failed to launch background agent: \(error.localizedDescription)")
+            AppLog.swarm.error("⚠️ Failed to launch background agent: \(error.localizedDescription, privacy: .public)")
             return nil
         }
 

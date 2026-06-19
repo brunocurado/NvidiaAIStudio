@@ -224,9 +224,9 @@ final class AnthropicAPIService: AIProvider {
     
     private func maxOutputTokens(reasoningLevel: ReasoningLevel) -> Int {
         switch reasoningLevel {
-        case .high: return 8192
-        case .medium: return 6144
-        case .low, .off: return 4096
+        case .high: return PromptConfig.default.defaultMaxOutputTokens
+        case .medium: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.75)
+        case .low, .off: return Int(Double(PromptConfig.default.defaultMaxOutputTokens) * 0.5)
         }
     }
 

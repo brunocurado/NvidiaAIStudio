@@ -39,7 +39,7 @@ final class AppState {
         } catch {
             // Schema changes can make SwiftData refuse to open the store. Keep a
             // backup before recreating so chat and swarm data is not silently lost.
-            print("⚠️ SwiftData store failed to open — backing up and recreating: \(error)")
+            AppLog.app.error("⚠️ SwiftData store failed to open — backing up and recreating: \(error.localizedDescription, privacy: .public)")
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport
             let storeFiles = (try? FileManager.default.contentsOfDirectory(at: storeDir, includingPropertiesForKeys: nil)) ?? []
@@ -53,7 +53,7 @@ final class AppState {
             }
             do {
                 container = try makeContainer()
-                print("✅ SwiftData store recreated. Backup kept at \(backupDir.path)")
+                AppLog.app.notice("✅ SwiftData store recreated. Backup kept at \(backupDir.path, privacy: .public)")
             } catch {
                 fatalError("Failed to initialize SwiftData container even after wiping store: \(error)")
             }
@@ -614,9 +614,9 @@ final class AppState {
         
         do {
             try context.save()
-            print("✅ Default agents seeded into Swarm Data Store")
+            AppLog.app.notice("✅ Default agents seeded into Swarm Data Store")
         } catch {
-            print("❌ Failed to seed default agents: \(error)")
+            AppLog.app.error("❌ Failed to seed default agents: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

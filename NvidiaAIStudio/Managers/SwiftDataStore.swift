@@ -46,7 +46,7 @@ actor SwiftDataStore {
             try modelContext.save()
         } catch {
             // Log the error but don't crash — the session is still in memory
-            print("⚠️ SwiftDataStore.save failed for session \(sessionID): \(error.localizedDescription)")
+            AppLog.app.error("⚠️ SwiftDataStore.save failed for session \(sessionID): \(error.localizedDescription, privacy: .public)")
             // Rollback the context to a clean state for the next save attempt
             modelContext.rollback()
         }

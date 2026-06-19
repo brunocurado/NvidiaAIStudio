@@ -76,7 +76,7 @@ final class GitHubService {
                 NSPasteboard.general.setString(userCode, forType: .string)
             }
             onUserCode?(userCode, verificationURI)
-            print("[GitHub OAuth] User code: \(userCode) — open \(verificationURI)")
+            AppLog.app.info("[GitHub OAuth] User code: \(userCode, privacy: .public) — open \(verificationURI, privacy: .public)")
             
             // Step 3: Poll for access token
             let deadline = Date().addingTimeInterval(TimeInterval(expiresIn))
@@ -101,7 +101,7 @@ final class GitHubService {
                 }
             }
         } catch {
-            print("[GitHub OAuth] Error: \(error)")
+            AppLog.app.error("[GitHub OAuth] Error: \(error.localizedDescription, privacy: .public)")
         }
     }
     

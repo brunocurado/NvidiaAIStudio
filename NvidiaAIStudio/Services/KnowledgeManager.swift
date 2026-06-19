@@ -277,7 +277,7 @@ final class KnowledgeManager {
                 }
             }
         } catch {
-            print("[KnowledgeManager] Digest error for \(file.filename): \(error)")
+            AppLog.skills.error("[KnowledgeManager] Digest error for \(file.filename, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
         

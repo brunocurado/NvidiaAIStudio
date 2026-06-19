@@ -73,67 +73,8 @@ final class ChatViewModel {
         streamTask = nil
         isStreaming = false
     }
-    
-    private func extractLongCatToolCalls(from content: String) -> (toolCalls: [Message.ToolCall], cleanedContent: String) {
-        let namePattern = #"<longcat_tool_call>\s*([^<]+?)\s*</longcat_tool_call>"#
-        guard let nameRegex = try? NSRegularExpression(pattern: namePattern, options: [.dotMatchesLineSeparators]) else {
-            return ([], content)
-        }
-        
-        var cleanedContent = content
-        var toolCalls: [Message.ToolCall] = []
-        let nsContent = content as NSString
-        let matches = nameRegex.matches(in: content, range: NSRange(location: 0, length: nsContent.length))
-        
-        for (index, match) in matches.enumerated().reversed() {
-            guard match.numberOfRanges == 2 else { continue }
-            
-            let name = nsContent.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespacesAndNewlines)
-            let nextStart = index + 1 < matches.count ? matches[index + 1].range.location : nsContent.length
-            let blockRange = NSRange(location: match.range.location, length: nextStart - match.range.location)
-            let rawBlock = nsContent.substring(with: blockRange)
-            let arguments = longCatArguments(from: rawBlock)
-            
-            guard !name.isEmpty else { continue }
-            let id = "longcat_call_" + UUID().uuidString.prefix(8)
-            toolCalls.insert(Message.ToolCall(id: String(id), name: name, arguments: arguments, status: .pending), at: 0)
-            cleanedContent = (cleanedContent as NSString).replacingCharacters(in: blockRange, with: "")
-        }
-        
-        return (toolCalls, cleanedContent.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-    
-    private func longCatArguments(from block: String) -> String {
-        var args: [String: String] = [:]
-        collectLongCatArguments(from: block, pattern: #"<longcat_arg_key>\s*([\s\S]*?)\s*</longcat_arg_key>\s*<longcat_arg_value>\s*([\s\S]*?)\s*</longcat_arg_value>"#, keyRange: 1, valueRange: 2, into: &args)
-        collectLongCatArguments(from: block, pattern: #"<longcat_arg_value>\s*([\s\S]*?)\s*</longcat_arg_value>\s*<longcat_arg_key>\s*([\s\S]*?)\s*</longcat_arg_key>"#, keyRange: 2, valueRange: 1, into: &args)
-        
-        guard !args.isEmpty,
-              let data = try? JSONSerialization.data(withJSONObject: args),
-              let json = String(data: data, encoding: .utf8)
-        else { return "{}" }
-        return json
-    }
-    
-    private func collectLongCatArguments(
-        from block: String,
-        pattern: String,
-        keyRange: Int,
-        valueRange: Int,
-        into args: inout [String: String]
-    ) {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return }
-        let nsBlock = block as NSString
-        let matches = regex.matches(in: block, range: NSRange(location: 0, length: nsBlock.length))
-        for match in matches where match.numberOfRanges > max(keyRange, valueRange) {
-            let key = nsBlock.substring(with: match.range(at: keyRange)).trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = nsBlock.substring(with: match.range(at: valueRange)).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !key.isEmpty {
-                args[key] = value
-            }
-        }
-    }
-    
+
+
     // MARK: - Agent Loop
     
     private func agentLoop(
@@ -144,7 +85,7 @@ final class ChatViewModel {
         appState: AppState,
         reasoningLevel: ReasoningLevel
     ) async {
-        let maxIterations = 50
+        let maxIterations = PromptConfig.default.maxChatIterations
         
         for _ in 0..<maxIterations {
             if Task.isCancelled { break }
@@ -190,7 +131,7 @@ final class ChatViewModel {
                 
                 // Auto-Compaction threshold check - Feature #3
                 // Use real LLM-based summarization instead of destructive content clearing
-                if self.contextUsage > 0.8 {
+                if self.contextUsage > PromptConfig.default.contextCompactionThreshold {
                     let messagesToCompress = msgs
                     Task { @MainActor in
                         appState.showToast("Context hit 80%. Summarizing history...", level: .warning)
@@ -248,15 +189,15 @@ final class ChatViewModel {
                     if let u = chunk.usage { accUsage = u }
                     if let fr = chunk.finishReason { accFinishReason = fr }
                     
-                    // Throttle UI updates to ~6/sec (every 150ms)
+                    // Throttle UI updates (configurable via PromptConfig)
                     let now = ContinuousClock.now
                     guard now - self.lastUIUpdateTime >= .milliseconds(150) else { continue }
                     self.lastUIUpdateTime = now
-                    
+
                     let snapContent = accContent
                     let snapReasoning = accReasoning
                     let snapToolCalls = accToolCalls
-                    
+
                     await MainActor.run {
                         self.updateMessage(id: streamingID, with: Message(id: streamingID, role: .assistant, content: snapContent, reasoning: snapReasoning, toolCalls: snapToolCalls, isStreaming: true), in: appState)
                         // Throttled scroll tick
@@ -282,68 +223,15 @@ final class ChatViewModel {
                 var finalContent = accContent
                 let finalReasoning = accReasoning
                 var extractedToolCalls = accToolCalls ?? []
-                
-                let longCatResult = extractLongCatToolCalls(from: finalContent)
-                if !longCatResult.toolCalls.isEmpty {
-                    extractedToolCalls.append(contentsOf: longCatResult.toolCalls)
-                    finalContent = longCatResult.cleanedContent
+
+                // Unified parser handles the standardized <tool name="..."> format
+                let parsedResult = ToolCallParser.parse(finalContent)
+                if !parsedResult.toolCalls.isEmpty {
+                    extractedToolCalls.append(contentsOf: parsedResult.toolCalls)
+                    finalContent = parsedResult.cleanedContent
                 }
-                
-                // DeepSeek V4-Pro/Claude XML Tool Call Parser
-                let pattern = "<tool_call\\s+name=\"([^\"]+)\">\\s*(.*?)\\s*</tool_call>"
-                if let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) {
-                    let nsString = finalContent as NSString
-                    let matches = regex.matches(in: finalContent, range: NSRange(location: 0, length: nsString.length))
-                    
-                    for match in matches.reversed() {
-                        if match.numberOfRanges == 3 {
-                            let name = nsString.substring(with: match.range(at: 1))
-                            let arguments = nsString.substring(with: match.range(at: 2))
-                            let id = "xml_call_" + UUID().uuidString.prefix(8)
-                            extractedToolCalls.append(Message.ToolCall(id: String(id), name: name, arguments: arguments, status: .pending))
-                            finalContent = (finalContent as NSString).replacingCharacters(in: match.range, with: "")
-                        }
-                    }
-                }
-                
-                // DeepSeek V4 Flash DSML Tool Call Parser
-                let dsmlPattern = "<(?:｜|\\|)DSML(?:｜|\\|)invoke\\s+name=\"([^\"]+)\">\\s*(.*?)\\s*</(?:｜|\\|)DSML(?:｜|\\|)invoke>"
-                if let dsmlRegex = try? NSRegularExpression(pattern: dsmlPattern, options: [.dotMatchesLineSeparators]) {
-                    let nsString = finalContent as NSString
-                    let matches = dsmlRegex.matches(in: finalContent, range: NSRange(location: 0, length: nsString.length))
-                    
-                    for match in matches.reversed() {
-                        if match.numberOfRanges == 3 {
-                            let name = nsString.substring(with: match.range(at: 1))
-                            let innerContent = nsString.substring(with: match.range(at: 2))
-                            var argsDict: [String: String] = [:]
-                            
-                            let paramPattern = "<(?:｜|\\|)DSML(?:｜|\\|)parameter\\s+name=\"([^\"]+)\"[^>]*>([\\s\\S]*?)</(?:｜|\\|)DSML(?:｜|\\|)parameter>"
-                            if let paramRegex = try? NSRegularExpression(pattern: paramPattern, options: [.dotMatchesLineSeparators]) {
-                                let innerNSString = innerContent as NSString
-                                let paramMatches = paramRegex.matches(in: innerContent, range: NSRange(location: 0, length: innerNSString.length))
-                                for pMatch in paramMatches {
-                                    if pMatch.numberOfRanges == 3 {
-                                        let pName = innerNSString.substring(with: pMatch.range(at: 1))
-                                        let pValue = innerNSString.substring(with: pMatch.range(at: 2))
-                                        argsDict[pName] = pValue
-                                    }
-                                }
-                            }
-                            
-                            let arguments = (try? String(data: JSONEncoder().encode(argsDict), encoding: .utf8)) ?? "{}"
-                            let id = "dsml_call_" + UUID().uuidString.prefix(8)
-                            extractedToolCalls.append(Message.ToolCall(id: String(id), name: name, arguments: arguments, status: .pending))
-                            
-                            finalContent = (finalContent as NSString).replacingCharacters(in: match.range, with: "")
-                        }
-                    }
-                }
-                
-                // Clean up remaining DSML wrapper tags if any
-                finalContent = finalContent.replacingOccurrences(of: "<｜DSML｜tool_calls>", with: "").replacingOccurrences(of: "</｜DSML｜tool_calls>", with: "")
-                finalContent = finalContent.replacingOccurrences(of: "<|DSML|tool_calls>", with: "").replacingOccurrences(of: "</|DSML|tool_calls>", with: "")
-                
+
+                finalContent = finalContent.trimmingCharacters(in: .whitespacesAndNewlines)
                 finalContent = finalContent.trimmingCharacters(in: .whitespacesAndNewlines)
                 let completedContent = finalContent
                 let finalToolCalls = extractedToolCalls.isEmpty ? nil : extractedToolCalls
@@ -658,7 +546,9 @@ final class ChatViewModel {
         estimatedTokenCount = tokens
         maxTokens = model.contextWindow
         contextUsage = min(1.0, Double(tokens) / Double(model.contextWindow))
-        if contextUsage >= 0.80 { Task { await self.compressContext(appState: appState) } }
+        if contextUsage >= PromptConfig.default.contextCompactionThreshold {
+            Task { await self.compressContext(appState: appState) }
+        }
     }
     
     // MARK: - Context Compression
@@ -669,7 +559,7 @@ final class ChatViewModel {
               let model = appState.selectedModel,
               let service = ProviderServiceFactory.makeFromAppState(appState) else { return }
         let messages = session.messages
-        let keepLast = 6
+        let keepLast = PromptConfig.default.compactionKeepLast
         guard messages.count > keepLast + 2 else { return }
         let toCompress = Array(messages.dropLast(keepLast))
         let toKeep = Array(messages.suffix(keepLast))
@@ -785,8 +675,9 @@ final class ChatViewModel {
                 group.addTask {
                     return try await self.skillRegistry.execute(name: toolCall.name, arguments: toolCall.arguments, accessLevel: accessLevel, workspacePath: workspacePath)
                 }
+                let timeoutNanos = UInt64(PromptConfig.default.chatToolTimeout * 1_000_000_000)
                 group.addTask {
-                    try await Task.sleep(nanoseconds: 30_000_000_000) // 30 seconds timeout
+                    try await Task.sleep(nanoseconds: timeoutNanos)
                     throw CancellationError()
                 }
                 let first = try await group.next()!
@@ -808,7 +699,7 @@ final class ChatViewModel {
                 }
             }
         } catch is CancellationError {
-            rawResult = "Error: Tool execution timed out after 30 seconds. The operation took too long (this often happens when running directory trees on massive folders like node_modules). Please try a more specific command."
+            rawResult = "Error: Tool execution timed out after \(Int(PromptConfig.default.chatToolTimeout)) seconds. The operation took too long (this often happens when running directory trees on massive folders like node_modules). Please try a more specific command."
             await MainActor.run {
                 self.updateToolCallResult(messageID: streamingID, toolCallID: toolCall.id, result: rawResult, status: .failed, in: appState)
             }

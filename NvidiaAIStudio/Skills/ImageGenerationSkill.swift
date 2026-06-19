@@ -53,7 +53,7 @@ struct ImageGenerationSkill: Skill {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 60
+        request.timeoutInterval = PromptConfig.default.swarmToolTimeout
 
         let payload: [String: Any] = [
             "prompt": prompt,

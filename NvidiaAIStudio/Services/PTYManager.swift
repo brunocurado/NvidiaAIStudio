@@ -91,7 +91,7 @@ final class PTYProcess: @unchecked Sendable {
         }
         
         guard childPID > 0 else {
-            print("[PTYProcess] forkpty failed")
+            AppLog.app.error("[PTYProcess] forkpty failed")
             return
         }
         

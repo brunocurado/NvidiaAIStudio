@@ -97,20 +97,20 @@ enum ModelFetcher {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
-            guard let httpResponse = response as? HTTPURLResponse else { 
-                print("ModelFetcher: Not an HTTP response")
-                return nil 
-            }
-            
-            if httpResponse.statusCode != 200 {
-                print("ModelFetcher: HTTP \(httpResponse.statusCode) from \(endpoint)")
+            guard let httpResponse = response as? HTTPURLResponse else {
+                AppLog.network.warning("ModelFetcher: Not an HTTP response")
                 return nil
             }
-            
+
+            if httpResponse.statusCode != 200 {
+                AppLog.network.warning("ModelFetcher: HTTP \(httpResponse.statusCode) from \(endpoint, privacy: .public)")
+                return nil
+            }
+
             guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let models = json["data"] as? [[String: Any]] else { 
-                print("ModelFetcher: JSON decode failed")
-                return nil 
+                  let models = json["data"] as? [[String: Any]] else {
+                AppLog.network.warning("ModelFetcher: JSON decode failed")
+                return nil
             }
             
             let parsed = models.compactMap { modelDict -> AIModel? in
@@ -144,11 +144,11 @@ enum ModelFetcher {
                 )
             }.sorted { $0.name < $1.name }
             
-            print("ModelFetcher: Successfully fetched \(parsed.count) models!")
+            AppLog.network.notice("ModelFetcher: Successfully fetched \(parsed.count) models!")
             return parsed
-            
+
         } catch {
-            print("ModelFetcher: Network error - \(error.localizedDescription)")
+            AppLog.network.error("ModelFetcher: Network error - \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }
