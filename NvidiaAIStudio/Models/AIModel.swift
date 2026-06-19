@@ -7,15 +7,20 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
     let provider: Provider
     var contextWindow: Int
     let supportsThinking: Bool
+    /// Whether the model supports the `output_config.effort` parameter (Anthropic Opus 4.7+).
+    /// When false, the effort level is still respected via `budget_tokens` but the explicit
+    /// effort signal is not sent to avoid API errors on older models.
+    let supportsEffort: Bool
     let supportsVision: Bool
     var isEnabled: Bool
-    
+
     init(
         id: String,
         name: String,
         provider: Provider = .nvidia,
         contextWindow: Int = 128_000,
         supportsThinking: Bool = false,
+        supportsEffort: Bool = false,
         supportsVision: Bool = false,
         isEnabled: Bool = true
     ) {
@@ -24,17 +29,18 @@ struct AIModel: Identifiable, Codable, Equatable, Hashable {
         self.provider = provider
         self.contextWindow = contextWindow
         self.supportsThinking = supportsThinking
+        self.supportsEffort = supportsEffort
         self.supportsVision = supportsVision
         self.isEnabled = isEnabled
     }
-    
+
     /// Curated models for Anthropic.
     static let anthropicModels: [AIModel] = [
-        AIModel(id: "claude-opus-4-5",           name: "🟠 Claude Opus 4 — Most capable",       provider: .anthropic, contextWindow: 200_000, supportsThinking: true,  supportsVision: true),
-        AIModel(id: "claude-sonnet-4-5",          name: "🟠 Claude Sonnet 4 — Fast & smart",    provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsVision: true),
-        AIModel(id: "claude-haiku-4-5",           name: "🟠 Claude Haiku 4 — Fastest",          provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsVision: true),
-        AIModel(id: "claude-3-7-sonnet-20250219", name: "🟠 Claude 3.7 Sonnet — Extended think",provider: .anthropic, contextWindow: 200_000, supportsThinking: true,  supportsVision: true),
-        AIModel(id: "claude-3-5-haiku-20241022",  name: "🟠 Claude 3.5 Haiku — Ultra fast",     provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsVision: true),
+        AIModel(id: "claude-opus-4-5",           name: "🟠 Claude Opus 4 — Most capable",       provider: .anthropic, contextWindow: 200_000, supportsThinking: true,  supportsEffort: true,  supportsVision: true),
+        AIModel(id: "claude-sonnet-4-5",          name: "🟠 Claude Sonnet 4 — Fast & smart",    provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsEffort: false, supportsVision: true),
+        AIModel(id: "claude-haiku-4-5",           name: "🟠 Claude Haiku 4 — Fastest",          provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsEffort: false, supportsVision: true),
+        AIModel(id: "claude-3-7-sonnet-20250219", name: "🟠 Claude 3.7 Sonnet — Extended think",provider: .anthropic, contextWindow: 200_000, supportsThinking: true,  supportsEffort: false, supportsVision: true),
+        AIModel(id: "claude-3-5-haiku-20241022",  name: "🟠 Claude 3.5 Haiku — Ultra fast",     provider: .anthropic, contextWindow: 200_000, supportsThinking: false, supportsEffort: false, supportsVision: true),
     ]
 
     /// Curated models for OpenAI.

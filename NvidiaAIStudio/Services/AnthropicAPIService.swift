@@ -130,8 +130,8 @@ final class AnthropicAPIService: AIProvider {
         }
 
         // Effort control (Claude Opus 4.7+): output_config.effort
-        // Controls the model's overall reasoning effort level, separate from budget_tokens.
-        if let effort = reasoningLevel.anthropicEffort {
+        // Only sent when the model explicitly supports it, to avoid 400 errors on older models.
+        if model.supportsEffort, let effort = reasoningLevel.anthropicEffort {
             body["output_config"] = ["effort": effort]
         }
 
